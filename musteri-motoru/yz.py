@@ -239,6 +239,7 @@ def haberleri_siniflandir(ist, proje, haberler):
     sema = _nesne({"sonuclar": {"type": "array", "items": _nesne({
         "id": I, "ilgili": {"type": "boolean"}, "uygunluk": I, "sirket": S,
         "sinyal": {"type": "string", "enum": kodlar}, "sehir": S, "sektor": S, "neden": S, "yaklasim": S,
+        "kisi_ad": S, "kisi_unvan": S,
     })}})
     liste = "\n".join(
         f"<haber id=\"{h['id']}\">\n<baslik>{h['baslik']}</baslik>\n<kaynak>{h.get('kaynak', '')} {h.get('tarih', '')}</kaynak>\n"
@@ -256,16 +257,29 @@ def haberleri_siniflandir(ist, proje, haberler):
         "- sinyal: tanımlı sinyal kodlarından en uygunu, hiçbiri değilse 'yok'.\n"
         "- sehir, sektor: haberde geçiyorsa.\n"
         "- neden: bir cümleyle neden fırsat (veya değil).\n"
-        "- yaklasim: bu şirkete ilk temasta bu habere nasıl atıf yapılır (bir cümle; ilgisizse boş)."
+        "- yaklasim: bu şirkete ilk temasta bu habere nasıl atıf yapılır (bir cümle; ilgisizse boş).\n"
+        "- kisi_ad, kisi_unvan: haberde bu şirketin adı geçen bir yöneticisi/çalışanı varsa (ör. yeni atanan genel müdür) "
+        "adı ve unvanı; yoksa boş."
     )
     sonuc = ist.json_iste(istem, sema, efor="low")
     return {int(r["id"]): r for r in sonuc.get("sonuclar", [])}
 
 
 # --- 3) İnternette aday araştırması ----------------------------------------------------------
+KISI_SEMA = {"type": "array", "items": _nesne({
+    "ad": S, "unvan": S, "rol": {"type": "string", "enum": ["karar_verici", "etkileyen", "kullanici", "kapi", "diger"]},
+    "linkedin": S, "eposta": S, "telefon": S, "kaynak": S, "not": S})}
+
+KISI_KURALI = (
+    "Kişiler için yalnızca kamuya açık kaynaklarda (şirket web sitesi, haberler, basın bültenleri, KAP, kamuya açık "
+    "LinkedIn profil sayfaları ve arama sonuçları) ŞİRKETTEKİ ROLÜYLE yer alan çalışanları al. Bir kişinin LinkedIn "
+    "profil adresini yalnızca arama sonucunda veya bir sayfada gerçekten gördüysen yaz; adres tahmin etme, uydurma. "
+    "Kişisel cep telefonu veya kişisel e-posta toplama; yalnızca kurumsal ve kamuya açık iletişim bilgisi yaz. "
+    "Her kişi için bilgiyi nerede gördüğünü kaynak alanına yaz.")
+
 ADAY_SEMA = _nesne({"adaylar": {"type": "array", "items": _nesne({
     "ad": S, "web": S, "sektor": S, "sehir": S, "sinyal": S, "sinyal_ozet": S, "sinyal_tarihi": S,
-    "kaynak": S, "neden": S, "yetkili_unvan": S, "telefon": S, "eposta": S,
+    "kaynak": S, "neden": S, "yetkili_unvan": S, "telefon": S, "eposta": S, "kisiler": KISI_SEMA,
 })}})
 
 
@@ -278,7 +292,9 @@ def aday_arastir(ist, proje, mevcut_adlar, ek_talimat="", adet=15):
         "Ticaret Sicili Gazetesi, teşvik ve ihale duyuruları, kariyer ilanları, şirket web siteleri gibi "
         "kaynakları kullan. Her şirket için: şirket adı, web sitesi, sektör, şehir, hangi sinyal ve kısa "
         "açıklaması, sinyal tarihi, kaynak linki, neden uygun olduğu, ulaşılacak unvan ve web sitesinde "
-        "yayımlanmış kurumsal telefon/e-posta (varsa). Sadece doğrulayabildiğin bilgileri yaz.\n"
+        "yayımlanmış kurumsal telefon/e-posta (varsa) ve kamuya açık kaynaklarda bulabildiğin karar verici "
+        "kişiler (ad, unvan, LinkedIn profil adresi). Sadece doğrulayabildiğin bilgileri yaz.\n"
+        + KISI_KURALI + "\n"
         + (f"Listede zaten olan şirketleri tekrar önerme: {', '.join(mevcut_adlar[:150])}\n" if mevcut_adlar else "")
         + (f"Ek talimat: {ek_talimat}\n" if ek_talimat else ""),
         efor="medium")
@@ -292,7 +308,8 @@ def aday_arastir(ist, proje, mevcut_adlar, ek_talimat="", adet=15):
 
 FIRMA_SEMA = _nesne({
     "ozet": S, "son_gelismeler": SL, "ihtiyac_degerlendirmesi": S, "sektor": S, "sehir": S, "web": S,
-    "telefon": S, "eposta": S, "linkedin": S, "yetkili": S, "unvan": S, "sinyal": S, "sinyal_ozet": S,
+    "telefon": S, "eposta": S, "linkedin": S, "whatsapp": S, "instagram": S, "iletisim_formu": S,
+    "yetkili": S, "unvan": S, "kisiler": KISI_SEMA, "sinyal": S, "sinyal_ozet": S,
     "sinyal_tarihi": S, "kaynak": S, "yaklasim": S,
 })
 
@@ -304,11 +321,14 @@ def firma_arastir(ist, proje, lead):
         f"{_proje_ozeti(proje)}\n\nAraştırılacak firma: {bilinen}\n\n"
         "Bu firmayı internette araştır: ne yaptığı, büyüklüğü, son 12 aydaki önemli gelişmeler (yatırım, yönetici "
         "değişikliği, büyüme, ihale, ilan, sorun), bu projenin ürün/hizmetine ihtiyacı olup olmadığı ve neden, "
-        "satın almaya karar verecek kişinin unvanı ve kamuya açık rolüyle adı (şirket yöneticisi ise), web "
-        "sitesindeki kurumsal telefon ve e-posta, LinkedIn şirket sayfası. Kaynak linklerini belirt.",
+        "web sitesindeki kurumsal telefon, e-posta, WhatsApp hattı, iletişim formu ve LinkedIn/Instagram şirket "
+        "sayfaları. Ayrıca bu projenin hedef unvanlarına göre satın alma kararını veren, etkileyen ve ürünü "
+        "kullanacak 2-6 kişiyi bul: ad, unvan, LinkedIn profil adresi (site:linkedin.com/in aramasıyla). "
+        + KISI_KURALI + " Kaynak linklerini belirt.",
         efor="medium")
     sonuc = ist.json_iste(
         "Aşağıdaki araştırma raporunu yapılandır. Raporda olmayan bilgi ekleme, bilinmeyenleri boş bırak. "
+        "kisiler: raporda adı veya profili geçen çalışanlar; rol karar_verici/etkileyen/kullanici/kapi/diger. "
         f"sinyal alanına şu kodlardan uygun olanı yaz: {kodlar} (uymuyorsa boş). Tarih YYYY-AA-GG.\n\n"
         "<rapor>\n" + rapor + "\n</rapor>", FIRMA_SEMA, efor="low")
     return sonuc, rapor

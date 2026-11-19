@@ -199,6 +199,9 @@ def _siniflandirma_kaydet(db, proje, haber, r, sonuc):
                 "sinyal": sinyal, "sinyal_ozet": haber["baslik"][:200], "sinyal_tarihi": haber["tarih"],
                 "kaynak": haber["link"], "kaynak_turu": "haber", "izin": "kurumsal",
                 "notlar": f"Sinyal radarı: {r.get('neden', '')} Yaklaşım: {r.get('yaklasim', '')}".strip()}
+        if (r.get("kisi_ad") or "").strip():
+            lead["kisiler"] = [{"ad": r["kisi_ad"], "unvan": r.get("kisi_unvan", ""), "rol": "karar_verici",
+                                "kaynak": haber["link"]}]
         mevcut = motor.mukerrer_bul(db, proje["id"], lead)
         if mevcut:
             eski = motor.lead_getir(db, mevcut)
@@ -206,6 +209,10 @@ def _siniflandirma_kaydet(db, proje, haber, r, sonuc):
                 guncel = {k: lead[k] for k in ("sinyal", "sinyal_ozet", "sinyal_tarihi", "kaynak")}
                 guncel["notlar"] = ((eski.get("notlar") or "") + "\n" + lead["notlar"]).strip()
                 motor.lead_guncelle(db, mevcut, guncel, commit=False)
+            if lead.get("kisiler"):
+                birlesik = motor.kisileri_birlestir(eski["kisiler"], lead["kisiler"])
+                if birlesik != eski["kisiler"]:
+                    motor.lead_guncelle(db, mevcut, {"kisiler": birlesik}, commit=False)
                 sonuc["lead_guncellenen"] += 1
             lead_id = mevcut
         else:

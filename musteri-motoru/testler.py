@@ -114,7 +114,7 @@ class KaynakTesti(unittest.TestCase):
         self.assertEqual(s["epostalar"], ["info@firma.com.tr", "satis@firma.com.tr"])
         self.assertEqual(s["telefonlar"], ["+90 216 555 11 22", "+90 212 444 55 66", "+90 532 111 22 33"])
         self.assertEqual(s["iletisim_linkleri"], ["https://firma.com.tr/iletisim"])
-        self.assertEqual(s["sosyal"]["linkedin"], "https://www.linkedin.com/company/firma/")
+        self.assertEqual(s["sosyal"]["linkedin"], "https://www.linkedin.com/company/firma")
         self.assertEqual(s["sosyal"]["instagram"], "https://instagram.com/firma")
 
     def test_overpass_sorgusu(self):
@@ -303,6 +303,52 @@ class YZTesti(unittest.TestCase):
         p = motor.projeleri_listele(db)[0]
         self.assertEqual(p["mulakat"], {})
         self.assertFalse(p["tarama"]["aktif"])
+
+
+class KisiVeKanalTesti(unittest.TestCase):
+    def setUp(self):
+        self.db = motor.baglan(":memory:")
+        self.p = motor.proje_olustur(self.db, {"ad": "K", "sablon": "yazilim_saas"})
+
+    def test_siteden_kanallar_ve_ekip_profilleri(self):
+        html = """<a href="https://wa.me/905321112233?text=Merhaba">WhatsApp</a>
+        <a href="https://www.facebook.com/firma/">fb</a> <a href="https://www.facebook.com/sharer/sharer.php?u=x">paylaş</a>
+        <a href="https://x.com/firma">x</a> <a href="https://twitter.com/intent/tweet?text=x">tweet</a>
+        <a href="https://tr.linkedin.com/in/ayse-yilmaz-123/?trk=x">Ayşe Yılmaz</a>
+        <a href="https://www.linkedin.com/in/mehmet-k">LinkedIn profilim</a>
+        <form action="/gonder"><input name="ad"></form>"""
+        s = kaynaklar.sayfayi_coz(html, "https://firma.com/iletisim")
+        self.assertEqual(s["sosyal"]["whatsapp"], "+90 532 111 22 33")
+        self.assertEqual(s["sosyal"]["facebook"], "https://www.facebook.com/firma/")
+        self.assertEqual(s["sosyal"]["x"], "https://x.com/firma")
+        self.assertEqual(s["sosyal"]["iletisim_formu"], "https://firma.com/iletisim")
+        self.assertEqual([(k["ad"], k["linkedin"]) for k in s["kisiler"]],
+                         [("Ayşe Yılmaz", "https://www.linkedin.com/in/ayse-yilmaz-123"),
+                          ("", "https://www.linkedin.com/in/mehmet-k")])
+
+    def test_kisiler_kaydet_birlestir_ve_disa_aktar(self):
+        pid = self.p["id"]
+        lid, _ = motor.lead_ekle(self.db, pid, {"ad": "ABC Ltd", "kisiler": [
+            {"ad": "Ayşe Yılmaz", "unvan": "Genel Müdür", "linkedin": "linkedin.com/in/ayse/", "rol": "karar_verici"},
+            {"ad": "", "linkedin": ""}]})  # boş kişi atılır
+        l = motor.lead_getir(self.db, lid)
+        self.assertEqual(len(l["kisiler"]), 1)
+        self.assertEqual(l["kisiler"][0]["linkedin"], "https://www.linkedin.com/in/ayse")
+        # Mükerrer kayıt yeni kişiyi ekler, var olanın eksiğini tamamlar
+        motor.lead_ekle(self.db, pid, {"ad": "ABC", "kisiler": [
+            {"ad": "Ayşe Yılmaz", "eposta": "ayse@abc.com"}, {"ad": "Can Demir", "unvan": "BT Müdürü", "rol": "etkileyen"}]})
+        l = motor.lead_getir(self.db, lid)
+        self.assertEqual([k["ad"] for k in l["kisiler"]], ["Ayşe Yılmaz", "Can Demir"])
+        self.assertEqual(l["kisiler"][0]["eposta"], "ayse@abc.com")
+        liste = motor.leadleri_listele(self.db, pid)
+        self.assertEqual(liste[0]["puan_detay"]["iletisim"], 5)  # kişide e-posta (3) + kişi var (2)
+        csv_metin = motor.csv_uret(liste, self.p)
+        self.assertIn("Kişi 1 LinkedIn", csv_metin)
+        self.assertIn("Ayşe Yılmaz;Genel Müdür;https://www.linkedin.com/in/ayse;ayse@abc.com;Can Demir", csv_metin)
+
+    def test_whatsapp_normal(self):
+        self.assertEqual(motor.whatsapp_normal("https://api.whatsapp.com/send?phone=905551112233"), "+90 555 111 22 33")
+        self.assertEqual(motor.whatsapp_normal("0555 111 22 33"), "+90 555 111 22 33")
 
 
 if __name__ == "__main__":

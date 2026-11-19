@@ -18,7 +18,7 @@ import urllib.request
 from html import unescape
 from html.parser import HTMLParser
 
-from motor import telefon_normal, web_normal
+from motor import linkedin_normal, telefon_normal, web_normal, whatsapp_normal
 from sablonlar import OSM_KATEGORILER
 
 KULLANICI_AJANI = "MusteriBulmaMotoru/1.0 (+yerel kullanim)"
@@ -156,10 +156,13 @@ class _BaglantiToplayici(HTMLParser):
         self._metin = []
         self.metin = []
         self._atla = 0
+        self.form_var = False
 
     def handle_starttag(self, tag, attrs):
         if tag in ("script", "style", "noscript"):
             self._atla += 1
+        if tag == "form":
+            self.form_var = True
         if tag == "a":
             self._href = dict(attrs).get("href") or ""
             self._metin = []
@@ -184,7 +187,8 @@ EPOSTA_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 TELEFON_RE = re.compile(
     r"(?:(?:\+|00)90[\s.\-]?|0[\s.\-]?)?\(?[2-5]\d{2}\)?[\s.\-]?\d{3}[\s.\-]?\d{2}[\s.\-]?\d{2}(?!\d)"
     r"|444[\s.\-]?\d[\s.\-]?\d{3}(?!\d)")
-ILETISIM_KELIMELERI = ("iletisim", "iletişim", "contact", "bize-ulas", "bize ulaş", "ulasim", "hakkimizda", "about")
+ILETISIM_KELIMELERI = ("iletisim", "iletişim", "contact", "bize-ulas", "bize ulaş", "ulasim", "hakkimizda", "about",
+                       "ekibimiz", "ekip", "yonetim", "yönetim", "kadromuz", "team", "management")
 GECERSIZ_EPOSTA = ("example.", "domain.", "sentry", "wixpress", ".png", ".jpg", ".gif", ".webp", ".svg",
                    "@2x", "ornek@", "email@", "name@", "user@")
 
@@ -201,7 +205,7 @@ def sayfayi_coz(html_metin, taban_url):
     except Exception:  # bozuk HTML'de elimizdekiyle devam
         pass
     metin = unescape(" ".join(p.metin))
-    epostalar, telefonlar, sosyal, iletisim_linkleri = [], [], {}, []
+    epostalar, telefonlar, sosyal, iletisim_linkleri, kisiler = [], [], {}, [], []
 
     for href, yazi in p.baglantilar:
         h = unescape(href).strip()
@@ -214,10 +218,24 @@ def sayfayi_coz(html_metin, taban_url):
             n = telefon_normal(urllib.parse.unquote(h[4:]))
             if n.startswith(("+90", "444")) and n not in telefonlar:
                 telefonlar.append(n)
-        elif "linkedin.com/company" in hl or "linkedin.com/in/" in hl:
-            sosyal.setdefault("linkedin", h.split("?")[0])
+        elif "linkedin.com/in/" in hl:
+            # Sitede (ör. ekip/yönetim sayfasında) yayımlanmış çalışan profili
+            url = linkedin_normal(h.split("?")[0])
+            if all(k["linkedin"] != url for k in kisiler):
+                ad = yazi if 2 < len(yazi) < 60 and not re.search(r"linkedin|profil|http", yazi, re.I) else ""
+                kisiler.append({"ad": ad, "linkedin": url, "kaynak": taban_url, "rol": "diger"})
+        elif "linkedin.com/company" in hl or "linkedin.com/school" in hl:
+            sosyal.setdefault("linkedin", linkedin_normal(h.split("?")[0]))
         elif "instagram.com/" in hl and "/p/" not in hl:
             sosyal.setdefault("instagram", h.split("?")[0])
+        elif "wa.me/" in hl or "api.whatsapp.com" in hl or "whatsapp://" in hl:
+            n = whatsapp_normal(urllib.parse.unquote(h))
+            if n.startswith("+"):
+                sosyal.setdefault("whatsapp", n)
+        elif re.search(r"(^|//|\.)facebook\.com/(?!sharer|share|dialog|plugins)", hl):
+            sosyal.setdefault("facebook", h.split("?")[0])
+        elif re.search(r"(^|//|\.)(twitter|x)\.com/(?!intent|share|home)", hl):
+            sosyal.setdefault("x", h.split("?")[0])
         elif any(k in hl or k in yazi.lower() for k in ILETISIM_KELIMELERI):
             tam = urllib.parse.urljoin(taban_url, h)
             if urllib.parse.urlparse(tam).netloc == urllib.parse.urlparse(taban_url).netloc \
@@ -232,16 +250,18 @@ def sayfayi_coz(html_metin, taban_url):
         n = telefon_normal(t)
         if n.startswith(("+90", "444")) and n not in telefonlar:
             telefonlar.append(n)
+    if p.form_var and any(k in taban_url.lower() for k in ("iletisim", "contact", "bize-ulas")):
+        sosyal.setdefault("iletisim_formu", taban_url)
     return {"epostalar": epostalar, "telefonlar": telefonlar, "sosyal": sosyal,
-            "iletisim_linkleri": iletisim_linkleri}
+            "iletisim_linkleri": iletisim_linkleri, "kisiler": kisiler}
 
 
-def siteden_iletisim(web, en_fazla_sayfa=3):
-    """Ana sayfa + en fazla 2 iletişim/hakkımızda sayfasını tarar."""
+def siteden_iletisim(web, en_fazla_sayfa=4):
+    """Ana sayfa + en fazla 3 iletişim / hakkımızda / ekip sayfasını tarar."""
     url = web_normal(web)
     if not url:
         raise KaynakHatasi("Web adresi yok")
-    toplam = {"epostalar": [], "telefonlar": [], "sosyal": {}, "taranan": []}
+    toplam = {"epostalar": [], "telefonlar": [], "sosyal": {}, "kisiler": [], "taranan": []}
     kuyruk = [url]
     hatalar = []
     while kuyruk and len(toplam["taranan"]) < en_fazla_sayfa:
@@ -264,6 +284,9 @@ def siteden_iletisim(web, en_fazla_sayfa=3):
                 toplam["telefonlar"].append(t)
         for k, v in sonuc["sosyal"].items():
             toplam["sosyal"].setdefault(k, v)
+        for k in sonuc["kisiler"]:
+            if all(m["linkedin"] != k["linkedin"] for m in toplam["kisiler"]):
+                toplam["kisiler"].append(k)
         for link in sonuc["iletisim_linkleri"]:
             if link not in toplam["taranan"] and link not in kuyruk:
                 kuyruk.append(link)

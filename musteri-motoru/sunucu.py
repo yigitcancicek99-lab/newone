@@ -216,9 +216,13 @@ class Uygulama:
             alan = motor.alan_adi(lead["web"])
             ayni_alan = [e for e in bulunan["epostalar"] if e.endswith("@" + alan)]
             guncel["eposta"] = (ayni_alan or bulunan["epostalar"])[0]
-        for k in ("linkedin", "instagram"):
-            if not lead[k] and bulunan["sosyal"].get(k):
+        for k in ("linkedin", "instagram", "whatsapp", "facebook", "x", "iletisim_formu"):
+            if not lead.get(k) and bulunan["sosyal"].get(k):
                 guncel[k] = bulunan["sosyal"][k]
+        if bulunan.get("kisiler"):
+            birlesik = motor.kisileri_birlestir(lead["kisiler"], bulunan["kisiler"])
+            if birlesik != lead["kisiler"]:
+                guncel["kisiler"] = birlesik
         if lead.get("izin") in ("", "bilinmiyor") and guncel:
             guncel["izin"] = "kurumsal"
         if guncel:
@@ -318,8 +322,17 @@ class Uygulama:
         except yz.YZHatasi as e:
             raise Hata(str(e), 502)
         lead = motor.lead_getir(self.db, int(lid))
-        guncel = {k: bilgi[k] for k in ("sektor", "sehir", "web", "telefon", "eposta", "linkedin", "yetkili", "unvan")
+        guncel = {k: bilgi[k] for k in ("sektor", "sehir", "web", "telefon", "eposta", "linkedin", "whatsapp",
+                                        "instagram", "iletisim_formu", "yetkili", "unvan")
                   if bilgi.get(k) and not lead.get(k)}
+        if bilgi.get("kisiler"):
+            birlesik = motor.kisileri_birlestir(lead["kisiler"], bilgi["kisiler"])
+            if birlesik != lead["kisiler"]:
+                guncel["kisiler"] = birlesik
+            if not lead.get("yetkili") and not guncel.get("yetkili"):
+                ana = next((k for k in birlesik if k["rol"] == "karar_verici" and k["ad"]), None)
+                if ana:
+                    guncel["yetkili"], guncel["unvan"] = ana["ad"], ana["unvan"] or lead.get("unvan", "")
         if bilgi.get("sinyal") and (bilgi.get("sinyal_tarihi") or "") >= (lead.get("sinyal_tarihi") or ""):
             guncel.update({k: bilgi[k] for k in ("sinyal", "sinyal_ozet", "sinyal_tarihi", "kaynak") if bilgi.get(k)})
         not_ = (f"[YZ araştırması {date.today().isoformat()}] {bilgi.get('ozet', '')}\n"
@@ -414,7 +427,14 @@ def rapor_html(p, leadler):
     satirlar = []
     for i, l in enumerate(leadler, 1):
         iletisim = "<br>".join(e(x) for x in [l["telefon"], l["telefon2"], l["eposta"]] if x)
+        if l.get("whatsapp"):
+            iletisim += f"<div class='k'>WhatsApp: {e(l['whatsapp'])}</div>"
         kisi = " – ".join(e(x) for x in [l["yetkili"], l["unvan"]] if x)
+        ek_kisiler = [k for k in l.get("kisiler", []) if k.get("ad") != l["yetkili"]][:3]
+        if ek_kisiler:
+            kisi += "".join(
+                f"<div class='k'>{e(k['ad'] or 'Profil')}{' – ' + e(k['unvan']) if k['unvan'] else ''}"
+                + (f" · <a href='{e(k['linkedin'])}'>LinkedIn</a>" if k["linkedin"] else "") + "</div>" for k in ek_kisiler)
         sinyal = e(sinyal_adlari.get(l["sinyal"], l["sinyal"]))
         if l["sinyal_ozet"]:
             sinyal += f"<div class='k'>{e(l['sinyal_ozet'])}</div>"

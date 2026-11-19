@@ -4,6 +4,7 @@ CSV içe / dışa aktarma. Yalnızca Python standart kütüphanesi.
 """
 
 import csv
+import hashlib
 import io
 import json
 import os
@@ -21,6 +22,7 @@ VARSAYILAN_DB = os.path.join(KOK, "veri", "motor.db")
 LEAD_ALANLARI = [
     "ad", "tur", "sektor", "sehir", "ilce", "adres", "buyukluk",
     "web", "telefon", "telefon2", "eposta", "linkedin", "instagram",
+    "whatsapp", "facebook", "x", "iletisim_formu", "kisiler",
     "yetkili", "unvan", "sinyal", "sinyal_ozet", "sinyal_tarihi",
     "kaynak", "kaynak_turu", "izin", "durum", "sonraki_adim", "sonraki_tarih",
     "notlar", "dis_id",
@@ -92,7 +94,14 @@ CREATE INDEX IF NOT EXISTS ix_haber_proje ON haberler(proje_id);
 GOC_SUTUNLARI = {
     "projeler": {"mulakat": "TEXT DEFAULT '{}'", "yz_analiz": "TEXT DEFAULT '{}'",
                  "tarama": "TEXT DEFAULT '{}'", "son_tarama": "TEXT DEFAULT ''"},
+    "leadler": {"whatsapp": "TEXT DEFAULT ''", "facebook": "TEXT DEFAULT ''", "x": "TEXT DEFAULT ''",
+                "iletisim_formu": "TEXT DEFAULT ''", "kisiler": "TEXT DEFAULT '[]'"},
 }
+
+# Bir firmadaki ulaşılabilecek kişiler (karar verici, etkileyen, kullanıcı…)
+KISI_ALANLARI = ["ad", "unvan", "rol", "linkedin", "eposta", "telefon", "kaynak", "not"]
+KISI_ROLLERI = {"karar_verici": "Karar verici", "etkileyen": "Etkileyen / öneren", "kullanici": "Kullanıcı",
+                "kapi": "Kapı açıcı (asistan, santral)", "diger": "Diğer"}
 
 
 # --- Veritabanı --------------------------------------------------------------
@@ -260,8 +269,81 @@ def web_normal(web):
     return web
 
 
+def linkedin_normal(url):
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if "linkedin.com" not in url.lower():
+        return url
+    if "://" not in url:
+        url = "https://" + url
+    parca = urlparse(url)
+    yol = parca.path.rstrip("/")
+    return f"https://www.linkedin.com{yol}" if yol else "https://www.linkedin.com"
+
+
+def whatsapp_normal(deger):
+    """wa.me linki veya numarayı +90 5XX… biçimine çevirir."""
+    deger = (deger or "").strip()
+    m = re.search(r"(?:wa\.me/|phone=)\+?(\d{10,15})", deger)
+    return telefon_normal(m.group(1) if m else deger)
+
+
+def kisi_temizle(k):
+    if not isinstance(k, dict):
+        return None
+    kisi = {a: str(k.get(a) or "").strip()[:500] for a in KISI_ALANLARI}
+    if not (kisi["ad"] or kisi["linkedin"] or kisi["eposta"]):
+        return None
+    kisi["linkedin"] = linkedin_normal(kisi["linkedin"])
+    kisi["telefon"] = telefon_normal(kisi["telefon"])
+    kisi["eposta"] = kisi["eposta"].lower()
+    if kisi["rol"] not in KISI_ROLLERI:
+        kisi["rol"] = "karar_verici" if not kisi["rol"] else "diger"
+    kisi["id"] = str(k.get("id") or "") or hashlib.sha1(
+        (kisi["linkedin"] or kisi["eposta"] or sade(kisi["ad"])).encode()).hexdigest()[:10]
+    return kisi
+
+
+def kisiler_oku(deger):
+    if isinstance(deger, list):
+        liste = deger
+    else:
+        try:
+            liste = json.loads(deger or "[]")
+        except ValueError:
+            liste = []
+    return [k for k in (kisi_temizle(x) for x in liste if isinstance(x, dict)) if k]
+
+
+def kisi_anahtari(k):
+    return k.get("linkedin") or k.get("eposta") or sade(k.get("ad"))
+
+
+def kisileri_birlestir(eski, yeni):
+    """Aynı kişiyi (LinkedIn, e-posta veya ad) tekrar eklemez; eksik alanlarını doldurur."""
+    sonuc = [dict(k) for k in kisiler_oku(eski)]
+    for k in kisiler_oku(yeni):
+        mevcut = next((m for m in sonuc if kisi_anahtari(m) == kisi_anahtari(k)
+                       or (k["ad"] and sade(m["ad"]) == sade(k["ad"]))), None)
+        if mevcut:
+            for a in KISI_ALANLARI:
+                if k.get(a) and not mevcut.get(a):
+                    mevcut[a] = k[a]
+        else:
+            sonuc.append(k)
+    return sonuc
+
+
 def lead_temizle(veri):
-    lead = {k: ("" if veri.get(k) is None else str(veri.get(k)).strip()) for k in LEAD_ALANLARI if k in veri}
+    lead = {k: ("" if veri.get(k) is None else str(veri.get(k)).strip())
+            for k in LEAD_ALANLARI if k in veri and k != "kisiler"}
+    if "kisiler" in veri:
+        lead["kisiler"] = json.dumps(kisiler_oku(veri["kisiler"]), ensure_ascii=False)
+    if lead.get("linkedin"):
+        lead["linkedin"] = linkedin_normal(lead["linkedin"])
+    if lead.get("whatsapp"):
+        lead["whatsapp"] = whatsapp_normal(lead["whatsapp"])
     if "telefon" in lead:
         lead["telefon"] = telefon_normal(lead["telefon"])
     if "telefon2" in lead:
@@ -343,8 +425,12 @@ def puanla(lead, proje, bugun=None):
     hu = proje.get("hedef_unvanlar") or []
     unvan = 2.5 if not hu or not lead.get("unvan") else (5 if _eslesir(lead.get("unvan"), hu) else 1)
 
-    iletisim = (5 if lead.get("telefon") or lead.get("telefon2") else 0) \
-        + (3 if lead.get("eposta") else 0) + (2 if lead.get("yetkili") else 0)
+    kisiler = lead.get("kisiler") or []
+    if isinstance(kisiler, str):
+        kisiler = kisiler_oku(kisiler)
+    iletisim = (5 if lead.get("telefon") or lead.get("telefon2") or lead.get("whatsapp") else 0) \
+        + (3 if lead.get("eposta") or any(k.get("eposta") for k in kisiler) else 0) \
+        + (2 if lead.get("yetkili") or kisiler else 0)
 
     toplam = round(s_puan + tazelik + sektor + konum + buyukluk + unvan + iletisim, 1)
     esik_a = proje.get("esik_a", 70)
@@ -368,7 +454,7 @@ def leadleri_listele(db, proje_id, bugun=None):
     proje = proje_getir(db, proje_id)
     if not proje:
         return []
-    satirlar = [dict(s) for s in db.execute(
+    satirlar = [_lead_sozluk(s) for s in db.execute(
         "SELECT * FROM leadler WHERE proje_id = ?", (proje_id,)).fetchall()]
     for s in satirlar:
         s["puan"], s["oncelik"], s["puan_detay"] = puanla(s, proje, bugun)
@@ -377,9 +463,15 @@ def leadleri_listele(db, proje_id, bugun=None):
     return satirlar
 
 
+def _lead_sozluk(satir):
+    l = dict(satir)
+    l["kisiler"] = kisiler_oku(l.get("kisiler"))
+    return l
+
+
 def lead_getir(db, lead_id):
     s = db.execute("SELECT * FROM leadler WHERE id = ?", (lead_id,)).fetchone()
-    return dict(s) if s else None
+    return _lead_sozluk(s) if s else None
 
 
 def mukerrer_bul(db, proje_id, lead):
@@ -417,7 +509,11 @@ def lead_ekle(db, proje_id, veri, mukerrer_kontrol=True, commit=True):
         mevcut = mukerrer_bul(db, proje_id, lead)
         if mevcut:
             eski = lead_getir(db, mevcut)
-            eksik = {k: v for k, v in lead.items() if v and not eski.get(k)}
+            eksik = {k: v for k, v in lead.items() if v and not eski.get(k) and k != "kisiler"}
+            if lead.get("kisiler") and lead["kisiler"] != "[]":
+                birlesik = kisileri_birlestir(eski["kisiler"], lead["kisiler"])
+                if birlesik != eski["kisiler"]:
+                    eksik["kisiler"] = birlesik
             if eksik:
                 lead_guncelle(db, mevcut, eksik, commit=commit)
             return mevcut, False
@@ -483,6 +579,10 @@ BASLIK_ESLEME = {
     "eposta": ["eposta", "e posta", "email", "e mail", "mail", "mail adresi", "e posta adresi"],
     "linkedin": ["linkedin", "linkedin url"],
     "instagram": ["instagram"],
+    "whatsapp": ["whatsapp", "whatsapp hatti", "wp"],
+    "facebook": ["facebook"],
+    "x": ["x", "twitter"],
+    "iletisim_formu": ["iletisim formu", "contact form"],
     "yetkili": ["yetkili", "yetkili kisi", "ilgili kisi", "contact", "contact name", "hedef kisi", "kisi"],
     "unvan": ["unvan", "pozisyon", "gorev", "job title", "position", "hedef unvan"],
     "sinyal": ["sinyal", "sinyal turu", "signal"],
@@ -544,7 +644,12 @@ DISA_ALANLAR = [
     ("oncelik", "Öncelik"), ("puan", "Puan"), ("ad", "Firma / Kişi"), ("sektor", "Sektör"),
     ("sehir", "Şehir"), ("ilce", "İlçe"), ("adres", "Adres"), ("buyukluk", "Büyüklük"),
     ("yetkili", "Yetkili"), ("unvan", "Unvan"), ("telefon", "Telefon"), ("telefon2", "Telefon 2"),
-    ("eposta", "E-posta"), ("web", "Web"), ("linkedin", "LinkedIn"), ("instagram", "Instagram"),
+    ("eposta", "E-posta"), ("whatsapp", "WhatsApp"), ("web", "Web"), ("iletisim_formu", "İletişim formu"),
+    ("linkedin", "LinkedIn (şirket)"), ("instagram", "Instagram"), ("facebook", "Facebook"), ("x", "X / Twitter"),
+    ("kisi1_ad", "Kişi 1"), ("kisi1_unvan", "Kişi 1 unvan"), ("kisi1_linkedin", "Kişi 1 LinkedIn"), ("kisi1_eposta", "Kişi 1 e-posta"),
+    ("kisi2_ad", "Kişi 2"), ("kisi2_unvan", "Kişi 2 unvan"), ("kisi2_linkedin", "Kişi 2 LinkedIn"), ("kisi2_eposta", "Kişi 2 e-posta"),
+    ("kisi3_ad", "Kişi 3"), ("kisi3_unvan", "Kişi 3 unvan"), ("kisi3_linkedin", "Kişi 3 LinkedIn"), ("kisi3_eposta", "Kişi 3 e-posta"),
+    ("diger_kisiler", "Diğer kişiler"),
     ("sinyal_ad", "Sinyal"), ("sinyal_ozet", "Sinyal özeti"), ("sinyal_tarihi", "Sinyal tarihi"),
     ("kaynak", "Kaynak"), ("izin", "İzin"), ("durum", "Durum"), ("sonraki_adim", "Sonraki adım"),
     ("sonraki_tarih", "Sonraki tarih"), ("notlar", "Notlar"),
@@ -560,5 +665,11 @@ def csv_uret(leadler, proje):
     yazici.writerow([b for _, b in DISA_ALANLAR])
     for l in leadler:
         l = dict(l, sinyal_ad=sinyal_adlari.get(l.get("sinyal"), l.get("sinyal", "")))
+        kisiler = sorted(kisiler_oku(l.get("kisiler")), key=lambda k: list(KISI_ROLLERI).index(k["rol"]))
+        for i, k in enumerate(kisiler[:3], 1):
+            for a in ("ad", "unvan", "linkedin", "eposta"):
+                l[f"kisi{i}_{a}"] = k.get(a, "")
+        l["diger_kisiler"] = "; ".join(
+            " – ".join(x for x in (k["ad"], k["unvan"], k["linkedin"] or k["eposta"]) if x) for k in kisiler[3:])
         yazici.writerow([l.get(k, "") for k, _ in DISA_ALANLAR])
     return cikti.getvalue()

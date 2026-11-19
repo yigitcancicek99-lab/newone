@@ -227,6 +227,7 @@ function listeCiz() {
       <td>${e(l.sektor)}</td>
       <td>${e(l.sehir)}${l.ilce ? `<div class="k">${e(l.ilce)}</div>` : ""}</td>
       <td>${e(l.telefon) || '<span class="etiket uyari">telefon yok</span>'}${l.eposta ? `<div class="k">${e(l.eposta)}</div>` : ""}
+        ${kanalOzet(l)}
         ${l.iletisime_uygun ? "" : '<div><span class="etiket uyari">izin yok</span></div>'}</td>
       <td>${e(sinyalAdi(l.sinyal))}${l.sinyal_tarihi ? `<div class="k">${trTarih(l.sinyal_tarihi)}</div>` : ""}</td>
       <td><span class="etiket">${e(D.ayar.durumlar[l.durum] || l.durum)}</span></td>
@@ -262,8 +263,13 @@ function leadModal(id) {
       ${g("yetkili", b2c ? "İlgili kişi" : "Yetkili kişi")}${g("unvan", "Unvan")}
       ${g("telefon", "Telefon", "tel")}${g("telefon2", "Telefon 2", "tel")}
       ${g("eposta", "E-posta", "email")}${g("web", "Web sitesi")}
-      ${g("linkedin", "LinkedIn")}${g("instagram", "Instagram")}
+      ${g("whatsapp", "WhatsApp hattı", "tel")}${g("iletisim_formu", "İletişim formu (link)")}
+      ${g("linkedin", "LinkedIn şirket sayfası")}${g("instagram", "Instagram")}
+      ${g("facebook", "Facebook")}${g("x", "X / Twitter")}
       <label>İzin durumu<select name="izin">${secenek(D.ayar.izinler, l.izin || "bilinmiyor")}</select></label>
+      ${id ? `<div class="tam-satir">${kanalLinkleri(l)}</div>` : ""}
+      <div class="grup-baslik">Kişiler – firmada ulaşılacak insanlar (${(l.kisiler || []).length})</div>
+      <div class="tam-satir" id="kisiKutu"></div>
       <div class="grup-baslik">Sinyal (neden şimdi?)</div>
       <label>Sinyal<select name="sinyal">${sinyalSecenek(l.sinyal)}</select></label>
       ${g("sinyal_tarihi", "Sinyal tarihi", "date")}
@@ -278,17 +284,20 @@ function leadModal(id) {
       <div class="satir">
         ${id ? `<button type="button" class="btn tehlike" id="mSil">Sil</button>` : ""}
         ${id && l.web ? `<button type="button" class="btn" id="mZengin">Siteden iletişim topla</button>` : ""}
-        ${id ? `<button type="button" class="btn" id="mYz">YZ ile araştır</button>` : ""}
+        ${id ? `<button type="button" class="btn" id="mYz" title="Son gelişmeler, karar vericiler ve LinkedIn profilleri">YZ ile araştır (kişiler dahil)</button>` : ""}
         ${l.kaynak ? `<a class="btn" href="${e(l.kaynak)}" target="_blank" rel="noopener">Kaynağı aç</a>` : ""}
       </div>
       <div class="satir"><button type="button" class="btn" id="mIptal">Vazgeç</button>
         <button type="submit" class="btn birincil">Kaydet</button></div>
     </div>`;
   const dlg = $("#modal");
+  const kisiDurum = { kisiler: JSON.parse(JSON.stringify(l.kisiler || [])) };
+  kisiBolumuCiz($("#kisiKutu"), kisiDurum, l.ad || "", D.proje.hedef_unvanlar);
   $("#mIptal").onclick = () => dlg.close();
   $("#modalForm").onsubmit = async (ev) => {
     ev.preventDefault();
     const veri = Object.fromEntries(new FormData($("#modalForm")));
+    veri.kisiler = kisiDurum.kisiler;
     try {
       if (id) await api(`/api/leadler/${id}`, "PUT", veri);
       else {
