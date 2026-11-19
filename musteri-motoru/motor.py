@@ -29,9 +29,12 @@ LEAD_ALANLARI = [
 PROJE_ALANLARI = [
     "ad", "musteri", "satis_tipi", "teklif_turu", "teklif", "hedef_sektorler",
     "hedef_sehirler", "hedef_unvanlar", "hedef_buyuklukler", "sinyaller",
-    "esik_a", "esik_b", "notlar",
+    "esik_a", "esik_b", "notlar", "mulakat", "yz_analiz", "tarama",
 ]
 PROJE_LISTE_ALANLARI = {"hedef_sektorler", "hedef_sehirler", "hedef_unvanlar", "hedef_buyuklukler", "sinyaller"}
+PROJE_SOZLUK_ALANLARI = {"mulakat", "yz_analiz", "tarama"}
+VARSAYILAN_TARAMA = {"aktif": False, "aralik_saat": 12, "sorgular": [], "rss": [], "otomatik_lead_esik": 70,
+                     "yz_kullan": True}
 
 SEMA = """
 CREATE TABLE IF NOT EXISTS projeler (
@@ -70,7 +73,26 @@ CREATE TABLE IF NOT EXISTS leadler (
     olusturma TEXT, guncelleme TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_lead_proje ON leadler(proje_id);
+CREATE TABLE IF NOT EXISTS ayarlar (anahtar TEXT PRIMARY KEY, deger TEXT);
+CREATE TABLE IF NOT EXISTS haberler (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    proje_id INTEGER NOT NULL REFERENCES projeler(id) ON DELETE CASCADE,
+    anahtar TEXT NOT NULL,
+    baslik TEXT, link TEXT, kaynak TEXT, tarih TEXT, ozet TEXT, sorgu TEXT,
+    durum TEXT DEFAULT 'yeni',
+    uygunluk INTEGER, sirket TEXT DEFAULT '', sinyal TEXT DEFAULT '', sehir TEXT DEFAULT '',
+    sektor TEXT DEFAULT '', neden TEXT DEFAULT '', yaklasim TEXT DEFAULT '',
+    lead_id INTEGER, olusturma TEXT,
+    UNIQUE(proje_id, anahtar)
+);
+CREATE INDEX IF NOT EXISTS ix_haber_proje ON haberler(proje_id);
 """
+
+# Eski sürüm veritabanlarına eklenecek sütunlar
+GOC_SUTUNLARI = {
+    "projeler": {"mulakat": "TEXT DEFAULT '{}'", "yz_analiz": "TEXT DEFAULT '{}'",
+                 "tarama": "TEXT DEFAULT '{}'", "son_tarama": "TEXT DEFAULT ''"},
+}
 
 
 # --- Veritabanı --------------------------------------------------------------
@@ -81,7 +103,24 @@ def baglan(yol=VARSAYILAN_DB):
     db.row_factory = sqlite3.Row
     db.execute("PRAGMA foreign_keys = ON")
     db.executescript(SEMA)
+    for tablo, sutunlar in GOC_SUTUNLARI.items():
+        mevcut = {r["name"] for r in db.execute(f"PRAGMA table_info({tablo})")}
+        for ad, tanim in sutunlar.items():
+            if ad not in mevcut:
+                db.execute(f"ALTER TABLE {tablo} ADD COLUMN {ad} {tanim}")
+    db.commit()
     return db
+
+
+def ayar_oku(db, anahtar, varsayilan=""):
+    s = db.execute("SELECT deger FROM ayarlar WHERE anahtar = ?", (anahtar,)).fetchone()
+    return s["deger"] if s else varsayilan
+
+
+def ayar_yaz(db, anahtar, deger):
+    db.execute("INSERT INTO ayarlar (anahtar, deger) VALUES (?, ?) "
+               "ON CONFLICT(anahtar) DO UPDATE SET deger = excluded.deger", (anahtar, deger))
+    db.commit()
 
 
 def _simdi():
@@ -95,6 +134,12 @@ def proje_sozluk(satir):
             p[k] = json.loads(p.get(k) or "[]")
         except ValueError:
             p[k] = []
+    for k in PROJE_SOZLUK_ALANLARI:
+        try:
+            p[k] = json.loads(p.get(k) or "{}") or {}
+        except ValueError:
+            p[k] = {}
+    p["tarama"] = {**VARSAYILAN_TARAMA, **p["tarama"]}
     return p
 
 
@@ -120,6 +165,8 @@ def _proje_degerleri(veri):
             if isinstance(v, str):
                 v = [x.strip() for x in v.split(",") if x.strip()]
             v = json.dumps(v, ensure_ascii=False)
+        elif k in PROJE_SOZLUK_ALANLARI:
+            v = json.dumps(v or {}, ensure_ascii=False)
         elif k in ("esik_a", "esik_b"):
             v = int(v)
         degerler[k] = v
@@ -152,6 +199,7 @@ def proje_guncelle(db, proje_id, veri):
 
 
 def proje_sil(db, proje_id):
+    db.execute("DELETE FROM haberler WHERE proje_id = ?", (proje_id,))
     db.execute("DELETE FROM leadler WHERE proje_id = ?", (proje_id,))
     db.execute("DELETE FROM projeler WHERE id = ?", (proje_id,))
     db.commit()

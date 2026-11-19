@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import sys
 import unittest
 from datetime import date
@@ -135,6 +136,173 @@ class KaynakTesti(unittest.TestCase):
         self.assertEqual(l["adres"], "Bağdat Caddesi 10, Kadıköy")
         self.assertEqual(l["sehir"], "İstanbul")
         self.assertEqual(l["dis_id"], "osm:node/42")
+
+
+# --- Yapay zekâ ve sinyal radarı (Claude API sahte istemciyle) -------------------------
+import threading  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+import tarayici  # noqa: E402
+import yz  # noqa: E402
+from sablonlar import MULAKAT_BOLUMLERI  # noqa: E402
+
+
+class SahteAkis:
+    def __init__(self, yanit):
+        self.yanit = yanit
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get_final_message(self):
+        return self.yanit
+
+
+class SahteClaude:
+    """anthropic.Anthropic yerine geçer; her istekte sıradaki yanıtı döndürür ve parametreleri kaydeder."""
+
+    def __init__(self, yanitlar):
+        self.yanitlar = list(yanitlar)
+        self.istekler = []
+        self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self._stream))
+
+    def _stream(self, **kw):
+        self.istekler.append(kw)
+        y = self.yanitlar.pop(0)
+        if callable(y):
+            y = y(kw)
+        if isinstance(y, (dict, list)):
+            y = json.dumps(y, ensure_ascii=False)
+        if isinstance(y, str):
+            y = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text=y)])
+        return SahteAkis(y)
+
+
+RSS = """<?xml version="1.0"?><rss><channel><title>Google Haberler</title>
+<item><title>Anadolu Gıda Konya'da 500 milyon TL'lik yeni fabrika yatırımı yapıyor - Dünya</title>
+<link>https://haber.example/1</link><pubDate>Mon, 16 Nov 2026 08:00:00 GMT</pubDate><source url="x">Dünya</source>
+<description>&lt;a href="x"&gt;Anadolu Gıda&lt;/a&gt; yeni tesis</description></item>
+<item><title>Merkez Bankası faiz kararını açıkladı - AA</title><link>https://haber.example/2</link>
+<pubDate>Tue, 17 Nov 2026 08:00:00 GMT</pubDate><source url="y">AA</source></item>
+</channel></rss>"""
+
+
+class YZTesti(unittest.TestCase):
+    def setUp(self):
+        self.db = motor.baglan(":memory:")
+        self.p = motor.proje_olustur(self.db, {"ad": "Ambalaj", "sablon": "endustriyel_urun",
+                                               "hedef_sehirler": "Konya"})
+
+    def test_mulakat_analizi_ve_istek_parametreleri(self):
+        analiz = {"ozet": "x", "ideal_musteri": "Gıda üreticileri", "satis_tipi": "b2b", "teklif_turu": "urun",
+                  "hedef_sektorler": ["gıda"], "hedef_sehirler": ["Konya"], "hedef_unvanlar": ["Satın Alma Müdürü"],
+                  "hedef_buyuklukler": ["orta"], "sinyaller": [{"kod": "yeni_fabrika", "ad": "Yeni fabrika",
+                  "agirlik": 99, "yari_omur": 0, "nasil_tespit": "haber"}], "haber_sorgulari": ["gıda fabrikası yatırım"],
+                  "osm_kategoriler": [], "veri_kaynaklari": [], "mesaj_acisi": "", "ilk_temas_mesaji": "",
+                  "eksik_sorular": ["Minimum sipariş?"], "riskler": []}
+        sahte = SahteClaude([analiz])
+        ist = yz.Istemci("anahtar", _istemci=sahte)
+        motor.proje_guncelle(self.db, self.p["id"], {"mulakat": {"urun_hizmet": "Gıda ambalajı"}})
+        p = motor.proje_getir(self.db, self.p["id"])
+        sorular = [(b, k, s) for b, q in MULAKAT_BOLUMLERI for k, s, _ in q]
+        sonuc = yz.mulakat_analizi(ist, p, sorular)
+        self.assertEqual(sonuc["sinyaller"][0]["agirlik"], 30)  # sınırlandı
+        self.assertEqual(sonuc["sinyaller"][0]["yari_omur"], 90)  # geçersiz değer -> varsayılan
+        istek = sahte.istekler[0]
+        self.assertEqual(istek["model"], "claude-opus-5-5")
+        self.assertEqual(istek["fallbacks"], "default")
+        self.assertEqual(istek["output_config"]["format"]["type"], "json_schema")
+        self.assertIn("Gıda ambalajı", istek["messages"][0]["content"])
+        with self.assertRaises(yz.YZHatasi):  # boş mülakat
+            yz.mulakat_analizi(ist, self.p, sorular)
+
+    def test_haiku_yedek_parametresi_gondermez_ve_red(self):
+        red = SimpleNamespace(stop_reason="refusal", content=[])
+        sahte = SahteClaude([red])
+        ist = yz.Istemci("a", model="claude-haiku-5-5", _istemci=sahte)
+        with self.assertRaises(yz.YZHatasi):
+            ist.json_iste("x", {"type": "object"})
+        self.assertNotIn("fallbacks", sahte.istekler[0])
+
+    def test_web_arastirma_pause_turn_devam_eder(self):
+        dur = SimpleNamespace(stop_reason="pause_turn", content=[SimpleNamespace(type="server_tool_use")])
+        bitti = SimpleNamespace(stop_reason="end_turn", content=[SimpleNamespace(type="text", text="Rapor: ABC A.Ş.")])
+        sahte = SahteClaude([dur, bitti, {"adaylar": [{"ad": "ABC A.Ş.", "web": "abc.com", "sektor": "gıda",
+            "sehir": "Konya", "sinyal": "yeni_fabrika", "sinyal_ozet": "", "sinyal_tarihi": "", "kaynak": "",
+            "neden": "", "yetkili_unvan": "", "telefon": "", "eposta": ""}]}])
+        adaylar, rapor = yz.aday_arastir(yz.Istemci("a", _istemci=sahte), self.p, ["Eski Firma"])
+        self.assertEqual(adaylar[0]["ad"], "ABC A.Ş.")
+        self.assertEqual(rapor, "Rapor: ABC A.Ş.")
+        self.assertEqual(len(sahte.istekler[1]["messages"]), 2)  # asistan içeriği eklenerek devam edildi
+        self.assertEqual(sahte.istekler[0]["tools"][0]["type"], "web_search_20260209")
+        self.assertIn("Eski Firma", sahte.istekler[0]["messages"][0]["content"])
+
+    def test_rss_coz(self):
+        o = tarayici.rss_coz(RSS)
+        self.assertEqual(o[0]["baslik"], "Anadolu Gıda Konya'da 500 milyon TL'lik yeni fabrika yatırımı yapıyor")
+        self.assertEqual(o[0]["kaynak"], "Dünya")
+        self.assertEqual(o[0]["tarih"], "2026-11-16")
+        self.assertEqual(o[0]["ozet"], "Anadolu Gıda yeni tesis")
+
+    def test_tarama_otomatik_lead(self):
+        motor.proje_guncelle(self.db, self.p["id"], {"tarama": {"sorgular": ["gıda fabrikası"], "otomatik_lead_esik": 70}})
+        getirilen = []
+
+        def getir(url, zaman_asimi=0):
+            getirilen.append(url)
+            return RSS, url
+
+        def sinif(kw):
+            icerik = kw["messages"][0]["content"]
+            ids = dict((b, int(i)) for i, b in re.findall(r'<haber id="(\d+)">\n<baslik>(.*?)</baslik>', icerik))
+            ids = [next(v for k, v in ids.items() if k.startswith("Anadolu")),
+                   next(v for k, v in ids.items() if k.startswith("Merkez"))]
+            return {"sonuclar": [
+                {"id": ids[0], "ilgili": True, "uygunluk": 85, "sirket": "Anadolu Gıda", "sinyal": "yeni_fabrika",
+                 "sehir": "Konya", "sektor": "gıda", "neden": "Yeni tesis ambalaj ihtiyacı", "yaklasim": "Tebrik"},
+                {"id": ids[1], "ilgili": False, "uygunluk": 5, "sirket": "", "sinyal": "yok", "sehir": "",
+                 "sektor": "", "neden": "Makro haber", "yaklasim": ""}]}
+        ist = yz.Istemci("a", _istemci=SahteClaude([sinif]))
+        sonuc = tarayici.tara(self.db, threading.RLock(), self.p["id"], ist, getir=getir)
+        self.assertIn("news.google.com/rss/search", getirilen[0])
+        self.assertIn("when%3A30d", getirilen[0])  # ilk tarama 30 gün geriye bakar
+        self.assertEqual((sonuc["yeni"], sonuc["ilgili"], sonuc["lead_eklenen"]), (2, 1, 1))
+        lead = motor.leadleri_listele(self.db, self.p["id"])[0]
+        self.assertEqual((lead["ad"], lead["sinyal"], lead["sinyal_tarihi"], lead["kaynak_turu"]),
+                         ("Anadolu Gıda", "yeni_fabrika", "2026-11-16", "haber"))
+        self.assertEqual(len(tarayici.haberleri_listele(self.db, self.p["id"], "ilgili")), 1)
+        # İkinci tarama: aynı haberler tekrar eklenmez
+        sonuc2 = tarayici.tara(self.db, threading.RLock(), self.p["id"], None, getir=getir)
+        self.assertEqual(sonuc2["yeni"], 0)
+        self.assertIn("when%3A7d", getirilen[-1])
+
+    def test_tarama_zamani(self):
+        p = motor.proje_getir(self.db, self.p["id"])
+        self.assertFalse(tarayici.tarama_zamani_geldi(p))  # kapalı
+        p["tarama"]["aktif"] = True
+        self.assertTrue(tarayici.tarama_zamani_geldi(p))
+        from datetime import datetime, timedelta
+        p["son_tarama"] = (datetime.now() - timedelta(hours=2)).isoformat()
+        self.assertFalse(tarayici.tarama_zamani_geldi(p))
+        p["tarama"]["aralik_saat"] = 1
+        self.assertTrue(tarayici.tarama_zamani_geldi(p))
+
+    def test_eski_veritabani_gocu(self):
+        import sqlite3
+        import tempfile
+        yol = os.path.join(tempfile.mkdtemp(), "eski.db")
+        eski = sqlite3.connect(yol)
+        eski.executescript(motor.SEMA.split("CREATE TABLE IF NOT EXISTS ayarlar")[0])
+        eski.execute("INSERT INTO projeler (ad) VALUES ('eski')")
+        eski.commit()
+        eski.close()
+        db = motor.baglan(yol)
+        p = motor.projeleri_listele(db)[0]
+        self.assertEqual(p["mulakat"], {})
+        self.assertFalse(p["tarama"]["aktif"])
 
 
 if __name__ == "__main__":

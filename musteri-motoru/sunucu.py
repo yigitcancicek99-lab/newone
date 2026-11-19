@@ -27,11 +27,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import kaynaklar  # noqa: E402
 import motor  # noqa: E402
-from sablonlar import BUYUKLUKLER, DURUMLAR, IZINLER, OSM_KATEGORILER, SABLONLAR  # noqa: E402
+import tarayici  # noqa: E402
+import yz  # noqa: E402
+from sablonlar import (BUYUKLUKLER, DURUMLAR, IZINLER, MULAKAT_BOLUMLERI, OSM_KATEGORILER,  # noqa: E402
+                       SABLONLAR)
 
 WEB_KLASORU = os.path.join(motor.KOK, "web")
 ORNEK_CSV = os.path.join(os.path.dirname(motor.KOK), "data", "hedef-hesaplar.csv")
-KILIT = threading.Lock()  # SQLite bağlantısı iş parçacıkları arasında paylaşılıyor
+KILIT = threading.RLock()  # SQLite bağlantısı iş parçacıkları arasında paylaşılıyor
+
+
+class kilitsiz:
+    """Uzun ağ/YZ işlemleri sürerken kilidi bırakır, diğer istekler beklemesin."""
+
+    def __enter__(self):
+        KILIT.release()
+
+    def __exit__(self, *a):
+        KILIT.acquire()
 
 
 class Hata(Exception):
@@ -60,6 +73,18 @@ class Uygulama:
             ("PUT", r"/api/leadler/(\d+)", self.lead_guncelle),
             ("DELETE", r"/api/leadler/(\d+)", self.lead_sil),
             ("POST", r"/api/leadler/(\d+)/zenginlestir", self.zenginlestir),
+            ("GET", r"/api/yz", self.yz_durum),
+            ("PUT", r"/api/yz", self.yz_ayarla),
+            ("GET", r"/api/mulakat-sorulari", self.mulakat_sorulari),
+            ("GET", r"/api/projeler/(\d+)/mulakat-formu", self.mulakat_formu),
+            ("POST", r"/api/projeler/(\d+)/yz-analiz", self.yz_analiz),
+            ("POST", r"/api/projeler/(\d+)/yz-uygula", self.yz_uygula),
+            ("POST", r"/api/projeler/(\d+)/yz-aday", self.yz_aday),
+            ("POST", r"/api/projeler/(\d+)/tara", self.tara),
+            ("GET", r"/api/projeler/(\d+)/tarama-durum", self.tarama_durum),
+            ("GET", r"/api/projeler/(\d+)/haberler", self.haberler),
+            ("PUT", r"/api/haberler/(\d+)", self.haber_guncelle),
+            ("POST", r"/api/leadler/(\d+)/yz-arastir", self.yz_firma),
         ]
 
     # --- yardımcılar ---
@@ -77,6 +102,7 @@ class Uygulama:
             "osm_kategoriler": list(OSM_KATEGORILER),
             "buyuklukler": BUYUKLUKLER, "durumlar": DURUMLAR, "izinler": IZINLER,
             "ornek_var": os.path.exists(ORNEK_CSV),
+            "yz": yz.durum(self._ayar),
         }
 
     def projeler(self, istek):
@@ -172,13 +198,11 @@ class Uygulama:
             raise Hata("Lead bulunamadı", 404)
         if not lead.get("web"):
             raise Hata("Bu kaydın web adresi yok")
-        KILIT.release()  # ağ isteği sürerken diğer istekleri bekletme
         try:
-            bulunan = kaynaklar.siteden_iletisim(lead["web"])
+            with kilitsiz():
+                bulunan = kaynaklar.siteden_iletisim(lead["web"])
         except kaynaklar.KaynakHatasi as e:
             raise Hata(str(e), 502)
-        finally:
-            KILIT.acquire()
         lead = motor.lead_getir(self.db, int(lid))
         guncel = {}
         tel = [t for t in bulunan["telefonlar"] if t not in (lead["telefon"], lead["telefon2"])]
@@ -198,6 +222,152 @@ class Uygulama:
         if guncel:
             lead = motor.lead_guncelle(self.db, int(lid), guncel)
         return {"lead": lead, "bulunan": bulunan, "guncellenen": list(guncel)}
+
+    # --- Yapay zekâ ---
+    def _ayar(self, anahtar):
+        with KILIT:
+            return motor.ayar_oku(self.db, anahtar)
+
+    def istemci(self):
+        try:
+            return yz.Istemci.ayarlardan(self._ayar)
+        except yz.YZHatasi as e:
+            raise Hata(str(e), 400)
+
+    def yz_durum(self, istek):
+        return yz.durum(self._ayar)
+
+    def yz_ayarla(self, istek):
+        g = istek["govde"]
+        if "api_anahtari" in g:
+            motor.ayar_yaz(self.db, "anthropic_api_key", (g["api_anahtari"] or "").strip())
+        if g.get("model") in yz.MODELLER:
+            motor.ayar_yaz(self.db, "yz_model", g["model"])
+        return yz.durum(self._ayar)
+
+    def mulakat_sorulari(self, istek):
+        return [{"bolum": b, "sorular": [{"kod": k, "soru": s, "neden": n} for k, s, n in q]}
+                for b, q in MULAKAT_BOLUMLERI]
+
+    def mulakat_formu(self, istek, pid):
+        p = self._proje(pid)
+        return {"_ham": mulakat_html(p).encode("utf-8"), "_tur": "text/html; charset=utf-8"}
+
+    def yz_analiz(self, istek, pid):
+        p = self._proje(pid)
+        ist = self.istemci()
+        sorular = [(b, k, s) for b, q in MULAKAT_BOLUMLERI for k, s, _ in q]
+        try:
+            with kilitsiz():
+                analiz = yz.mulakat_analizi(ist, p, sorular)
+        except yz.YZHatasi as e:
+            raise Hata(str(e), 502)
+        return motor.proje_guncelle(self.db, int(pid), {"yz_analiz": analiz})
+
+    def yz_uygula(self, istek, pid):
+        """YZ analizini proje ayarlarına uygular (seçilen bölümler)."""
+        p = self._proje(pid)
+        a = p.get("yz_analiz") or {}
+        if not a:
+            raise Hata("Önce yapay zekâ analizi yapın")
+        secim = istek["govde"].get("bolumler") or ["hedefler", "sinyaller", "sorgular"]
+        veri = {}
+        if "hedefler" in secim:
+            for k in ("hedef_sektorler", "hedef_sehirler", "hedef_unvanlar", "hedef_buyuklukler", "satis_tipi",
+                      "teklif_turu"):
+                if a.get(k):
+                    veri[k] = a[k]
+        if "sinyaller" in secim and a.get("sinyaller"):
+            sinyaller = {s["kod"]: s for s in p["sinyaller"]}
+            for s in a["sinyaller"]:
+                sinyaller[s["kod"]] = {k: s[k] for k in ("kod", "ad", "agirlik", "yari_omur")}
+            veri["sinyaller"] = list(sinyaller.values())
+        if "sorgular" in secim and a.get("haber_sorgulari"):
+            veri["tarama"] = {**p["tarama"], "sorgular": a["haber_sorgulari"]}
+        return motor.proje_guncelle(self.db, int(pid), veri)
+
+    def yz_aday(self, istek, pid):
+        p = self._proje(pid)
+        ist = self.istemci()
+        mevcut = [r["ad"] for r in self.db.execute("SELECT ad FROM leadler WHERE proje_id = ?", (int(pid),))]
+        g = istek["govde"]
+        try:
+            with kilitsiz():
+                adaylar, rapor = yz.aday_arastir(ist, p, mevcut, g.get("talimat", ""), int(g.get("adet") or 15))
+        except yz.YZHatasi as e:
+            raise Hata(str(e), 502)
+        for a in adaylar:
+            a.update(kaynak_turu="yz_arastirma", izin="kurumsal")
+            neden, unvan = a.pop("neden", ""), a.pop("yetkili_unvan", "")
+            a["unvan"] = unvan
+            a["notlar"] = f"YZ araştırması: {neden}".strip() if neden else ""
+            a["mukerrer"] = bool(motor.mukerrer_bul(self.db, int(pid), a))
+        return {"adaylar": adaylar, "rapor": rapor}
+
+    def yz_firma(self, istek, lid):
+        lead = motor.lead_getir(self.db, int(lid))
+        if not lead:
+            raise Hata("Lead bulunamadı", 404)
+        p = self._proje(lead["proje_id"])
+        ist = self.istemci()
+        try:
+            with kilitsiz():
+                bilgi, rapor = yz.firma_arastir(ist, p, lead)
+        except yz.YZHatasi as e:
+            raise Hata(str(e), 502)
+        lead = motor.lead_getir(self.db, int(lid))
+        guncel = {k: bilgi[k] for k in ("sektor", "sehir", "web", "telefon", "eposta", "linkedin", "yetkili", "unvan")
+                  if bilgi.get(k) and not lead.get(k)}
+        if bilgi.get("sinyal") and (bilgi.get("sinyal_tarihi") or "") >= (lead.get("sinyal_tarihi") or ""):
+            guncel.update({k: bilgi[k] for k in ("sinyal", "sinyal_ozet", "sinyal_tarihi", "kaynak") if bilgi.get(k)})
+        not_ = (f"[YZ araştırması {date.today().isoformat()}] {bilgi.get('ozet', '')}\n"
+                f"İhtiyaç: {bilgi.get('ihtiyac_degerlendirmesi', '')}\n"
+                + "".join(f"- {g}\n" for g in bilgi.get("son_gelismeler", []))
+                + (f"Yaklaşım: {bilgi['yaklasim']}" if bilgi.get("yaklasim") else ""))
+        guncel["notlar"] = ((lead.get("notlar") or "") + "\n\n" + not_).strip()
+        lead = motor.lead_guncelle(self.db, int(lid), guncel)
+        return {"lead": lead, "bilgi": bilgi, "rapor": rapor,
+                "guncellenen": [k for k in guncel if k != "notlar"]}
+
+    # --- Sinyal radarı ---
+    def tara(self, istek, pid):
+        p = self._proje(pid)
+        if tarayici.DURUM.get(int(pid), {}).get("calisiyor"):
+            return {"basladi": False, "mesaj": "Tarama zaten sürüyor"}
+        ist = None
+        if p["tarama"].get("yz_kullan"):
+            try:
+                ist = yz.Istemci.ayarlardan(self._ayar)
+            except yz.YZHatasi:
+                ist = None  # YZ yoksa kelime puanıyla devam
+        tarayici.DURUM[int(pid)] = {"calisiyor": True, "mesaj": "Başlatılıyor…", "sonuc": None, "zaman": ""}
+
+        def calis():
+            try:
+                tarayici.tara(self.db, KILIT, int(pid), ist)
+            except Exception as e:
+                print(f"[tarama] {e}")
+        threading.Thread(target=calis, daemon=True).start()
+        return {"basladi": True, "yz": bool(ist)}
+
+    def tarama_durum(self, istek, pid):
+        p = self._proje(pid)
+        d = dict(tarayici.DURUM.get(int(pid)) or {"calisiyor": False, "mesaj": "", "sonuc": None})
+        d["son_tarama"] = p.get("son_tarama", "")
+        return d
+
+    def haberler(self, istek, pid):
+        self._proje(pid)
+        return tarayici.haberleri_listele(self.db, int(pid), istek["sorgu"].get("filtre", [""])[0])
+
+    def haber_guncelle(self, istek, hid):
+        g = istek["govde"]
+        alanlar = {k: g[k] for k in ("durum", "lead_id") if k in g}
+        if alanlar:
+            atama = ", ".join(f"{k} = ?" for k in alanlar)
+            self.db.execute(f"UPDATE haberler SET {atama} WHERE id = ?", [*alanlar.values(), int(hid)])
+            self.db.commit()
+        return {"tamam": True}
 
     def ornek_proje(self, istek):
         """Depodaki Cornerstone hedef hesaplarından örnek proje kurar."""
@@ -284,6 +454,30 @@ th{{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#667085}}
 İletişim bilgileri kurumların kamuya açık kaynaklarından derlenmiştir. Bireylere ticari ileti göndermeden önce İYS onayı gereklidir.
 OpenStreetMap kaynaklı veriler © OpenStreetMap katkıcıları (ODbL).</div>
 </body></html>"""
+
+
+def mulakat_html(p):
+    """Görüşmeye götürülecek / müşteriye gönderilecek yazdırılabilir mülakat formu."""
+    e = html.escape
+    cevap = p.get("mulakat") or {}
+    bolumler = []
+    for baslik, sorular in MULAKAT_BOLUMLERI:
+        ogeler = "".join(
+            f"<li><b>{e(s)}</b><div class='n'>{e(n)}</div><div class='c'>{e(cevap.get(k, '')) or '&nbsp;'}</div></li>"
+            for k, s, n in sorular)
+        bolumler.append(f"<h2>{e(baslik)}</h2><ol>{ogeler}</ol>")
+    ek = (p.get("yz_analiz") or {}).get("eksik_sorular") or []
+    if ek:
+        bolumler.append("<h2>Ek sorular</h2><ol>" + "".join(
+            f"<li><b>{e(s)}</b><div class='c'>&nbsp;</div></li>" for s in ek) + "</ol>")
+    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8"><title>Mülakat – {e(p['ad'])}</title>
+<style>body{{font:13px/1.5 system-ui,sans-serif;margin:32px;color:#1d2433;max-width:860px}}
+h1{{font-size:20px;margin:0}}h2{{font-size:15px;margin:22px 0 6px;border-bottom:1px solid #ddd;padding-bottom:4px}}
+li{{margin:10px 0}}.n{{color:#777;font-size:11px}}.c{{border:1px solid #ddd;border-radius:6px;min-height:42px;padding:6px 8px;
+white-space:pre-wrap;margin-top:4px}}@media print{{.yazdir{{display:none}}body{{margin:12mm}}li{{break-inside:avoid}}}}</style></head>
+<body><button class="yazdir" onclick="print()" style="float:right">Yazdır / PDF</button>
+<h1>Müşteri bulma mülakatı</h1><p>{e(p.get('musteri') or p['ad'])} · {date.today().strftime('%d.%m.%Y')}</p>
+{''.join(bolumler)}</body></html>"""
 
 
 def isleyici_olustur(uygulama):
@@ -373,6 +567,13 @@ def main():
     ap.add_argument("--tarayici-acma", action="store_true")
     args = ap.parse_args()
     uygulama = Uygulama(args.db)
+
+    def istemci_fabrikasi():
+        try:
+            return yz.Istemci.ayarlardan(uygulama._ayar)
+        except yz.YZHatasi:
+            return None
+    tarayici.zamanlayici_baslat(uygulama.db, KILIT, istemci_fabrikasi)
     sunucu = ThreadingHTTPServer(("127.0.0.1", args.port), isleyici_olustur(uygulama))
     adres = f"http://127.0.0.1:{args.port}"
     print(f"Müşteri Bulma Motoru çalışıyor: {adres}\nVeritabanı: {args.db}\nDurdurmak için Ctrl+C")

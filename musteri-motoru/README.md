@@ -8,7 +8,10 @@ Freelance müşteri bulma hizmeti için tasarlandı: **her müşteriniz = bir pr
 
 ## Kurulum ve çalıştırma
 
-Yalnızca Python 3.8+ gerekir (ek paket yok). [python.org](https://www.python.org/downloads/) → kurarken *"Add Python to PATH"* işaretleyin.
+Python 3.8+ gerekir. [python.org](https://www.python.org/downloads/) → kurarken *"Add Python to PATH"* işaretleyin.
+Yapay zekâ özellikleri için bir kez `pip install anthropic` çalıştırın ve uygulamadaki **Yapay zekâ ayarları**na
+Claude API anahtarınızı girin ([console.anthropic.com](https://console.anthropic.com) → API Keys). Yapay zekâ olmadan da
+liste oluşturma, iletişim toplama ve haber toplama çalışır.
 
 | Sistem | Nasıl açılır |
 |---|---|
@@ -19,7 +22,24 @@ Yalnızca Python 3.8+ gerekir (ek paket yok). [python.org](https://www.python.or
 Tarayıcıda `http://127.0.0.1:8765` açılır. Veriler `veri/motor.db` dosyasında, **yalnızca sizin bilgisayarınızda** tutulur
 (yedeklemek için bu dosyayı kopyalayın).
 
-## İş akışı
+## İş akışı (freelance müşteri bulma)
+
+A. **Mülakat** → Hizmet verdiğiniz firmayla 32 soruluk mülakatı yapın (firma ve teklif, mevcut müşteriler, karar
+   vericiler, tetikleyici olaylar, rakipler, ulaşma kanalları, hedefler). *Yazdırılabilir form* ile görüşmeye
+   götürebilir veya firmaya gönderebilirsiniz. **Yapay zekâ ile analiz et** şunları çıkarır: ideal müşteri profili,
+   hedef sektör/şehir/unvan/büyüklük, müşteri ihtiyacını fark etmeden önce görülebilen **satın alma sinyalleri**,
+   sinyal radarı sorguları, veri kaynakları, ilk temas mesajı ve firmaya sorulacak **ek sorular**. Ek soruların
+   cevaplarını girip tekrar analiz edebilirsiniz. **Projeye uygula** ile hepsi ayarlara aktarılır.
+B. **Sinyal radarı** → Sorgular Google Haberler'de (ve eklediğiniz RSS kaynaklarında) düzenli taranır. Yapay zekâ
+   her haberi okuyup hangi şirketin hangi sinyali verdiğini, uygunluk puanını (0–100) ve nasıl yaklaşılacağını yazar.
+   Eşiği geçen şirketler sinyal, tarih ve kaynak linkiyle **otomatik olarak listeye eklenir**. Tarama sıklığı proje
+   bazında ayarlanır; uygulama açık olduğu sürece arka planda çalışır.
+C. **İnternette aday araştırması** (Müşteri bul sekmesi) → Claude web araması yaparak profile uyan ve son 6 ayda
+   sinyal veren şirketleri, kaynak linkleri ve bulunabilen kurumsal iletişim bilgileriyle listeler.
+D. **Firma araştırması** (kayıt penceresi → *YZ ile araştır*) → tek bir firmanın son gelişmeleri, ihtiyaç
+   değerlendirmesi, karar verici unvanı ve kurumsal iletişim bilgileri; boş alanlar doldurulur, özet notlara eklenir.
+
+Klasik araçlar:
 
 1. **Yeni proje** → şablon seçin:
    - Yönetici arama / İK danışmanlığı (Cornerstone modeli)
@@ -71,6 +91,16 @@ Tarayıcıda `http://127.0.0.1:8765` açılır. Veriler `veri/motor.db` dosyası
 - Web sitesi taraması kayıt başına en fazla 3 sayfa açar; çok sayıda siteyi art arda taramak yerine ihtiyaç
   olan kayıtlar için kullanın.
 
+## Yapay zekâ maliyeti
+
+Varsayılan model **Claude Opus 5.5** ($4 / 1M girdi, $20 / 1M çıktı token). Kabaca: bir mülakat analizi birkaç
+kuruş–birkaç cent; 25 haberlik bir değerlendirme paketi birkaç cent; web araştırmaları web araması ücreti (1000 arama
+başına $10) ve daha fazla token kullandığı için en pahalı işlemdir. Çok sayıda haber taranan projelerde
+**Yapay zekâ ayarları**ndan Sonnet 5.5 veya Haiku 5.5 seçerek maliyeti düşürebilirsiniz. Model bir isteği güvenlik
+nedeniyle reddederse (Opus/Sonnet'te) Anthropic sunucu tarafında otomatik olarak yedek modelle tekrar dener.
+
+API anahtarı yalnızca `veri/motor.db` içinde saklanır (veya `ANTHROPIC_API_KEY` ortam değişkeninden okunur).
+
 ## Dosyalar
 
 | Dosya | İçerik |
@@ -78,6 +108,8 @@ Tarayıcıda `http://127.0.0.1:8765` açılır. Veriler `veri/motor.db` dosyası
 | `sunucu.py` | Yerel web sunucusu ve API |
 | `motor.py` | Veritabanı, puanlama, mükerrer kontrolü, CSV içe/dışa aktarma |
 | `kaynaklar.py` | OpenStreetMap araması ve web sitesinden iletişim çıkarma |
-| `sablonlar.py` | Proje şablonları, sinyaller, OSM kategorileri — yeni sektör şablonu buraya eklenir |
+| `yz.py` | Claude API: mülakat analizi, haber sınıflandırma, internette aday ve firma araştırması |
+| `tarayici.py` | Sinyal radarı: Google Haberler / RSS tarama, otomatik aday ekleme, zamanlayıcı |
+| `sablonlar.py` | Proje şablonları, sinyaller, OSM kategorileri, mülakat soruları — buradan düzenlenir |
 | `web/` | Arayüz (HTML/CSS/JS) |
 | `testler.py` | Otomatik testler: `python3 -m unittest testler` |

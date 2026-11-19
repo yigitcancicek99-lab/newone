@@ -99,3 +99,23 @@ ul.kaynaklar { margin: 0; padding-left: 18px; } ul.kaynaklar li { margin: 4px 0;
   .ana { padding: 16px; }
   .iki { grid-template-columns: 1fr; }
 }
+.yz-btn { margin-top: 24px; display: flex; align-items: center; gap: 8px; justify-content: center; }
+.nokta { width: 8px; height: 8px; border-radius: 50%; background: var(--c); display: inline-block; }
+.nokta.acik { background: var(--a); }
+.soru { margin: 14px 0; }
+.soru b { display: block; margin-bottom: 2px; }
+.soru .k { margin-bottom: 6px; }
+.soru textarea { font-family: inherit; font-size: 14px; }
+.haber { padding: 12px 0; border-bottom: 1px solid var(--cizgi); display: grid; grid-template-columns: 52px 1fr auto; gap: 12px; }
+.haber:last-child { border-bottom: 0; }
+.haber a { color: var(--metin); font-weight: 600; text-decoration: none; }
+.haber a:hover { text-decoration: underline; }
+.puan-kutu { font-weight: 700; font-size: 18px; text-align: center; font-variant-numeric: tabular-nums; }
+.puan-kutu small { display: block; font-size: 10px; color: var(--soluk); font-weight: 400; }
+.yatay { display: flex; gap: 6px; flex-wrap: wrap; align-items: flex-start; }
+.analiz h3 { font-size: 13px; margin: 14px 0 4px; }
+.analiz ul { margin: 4px 0; padding-left: 18px; }
+.mesaj-kutu { white-space: pre-wrap; background: var(--yuzey2); border-radius: 8px; padding: 10px 12px; }
+.adim { display: flex; gap: 10px; align-items: baseline; }
+.adim b { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--vurgu); color: var(--vurgu-metin);
+  display: inline-flex; align-items: center; justify-content: center; font-size: 12px; }

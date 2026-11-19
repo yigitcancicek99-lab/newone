@@ -54,6 +54,10 @@ async function basla() {
   $("#topluZenginBtn").onclick = topluZenginlestir;
   $("#osmForm").onsubmit = osmAra;
   $("#iceForm").onsubmit = iceAktar;
+  $("#yzAyarBtn").onclick = yzAyarModal;
+  $("#ydForm").onsubmit = ydAra;
+  D.sorular = await api("/api/mulakat-sorulari");
+  yzNoktaGuncelle(D.ayar.yz);
   const son = Number(localStorageOku("sonProje"));
   await projeleriYukle(son || null);
 }
@@ -94,6 +98,8 @@ async function projeSec(id) {
   $("#iceIzin").value = D.proje.satis_tipi === "b2c" ? "bilinmiyor" : "kurumsal";
   $("#osmSonuc").innerHTML = "";
   await leadleriYukle();
+  $("#ydSonuc").innerHTML = "";
+  D.radarFiltre = "ilgili";
   sekmeGoster(D.sekme);
 }
 
@@ -108,6 +114,8 @@ function sekmeGoster(ad) {
   $$(".sekmeler button").forEach((b) => b.classList.toggle("aktif", b.dataset.sekme === ad));
   $$(".sekme").forEach((s) => s.classList.toggle("gizli", s.id !== `sekme-${ad}`));
   if (ad === "ayar") ayarCiz();
+  if (ad === "mulakat") mulakatCiz();
+  if (ad === "radar") radarCiz();
 }
 
 // --- Pano --------------------------------------------------------------------
@@ -161,11 +169,23 @@ function panoCiz() {
           (l) => `<b>${trTarih(l.sonraki_tarih)}</b><div class="k">${e(l.sonraki_adim)}</div>`)}
       </div>
     </div>
+    <div class="kart" id="panoSinyaller"><h2>Sinyal radarından son fırsatlar</h2><p class="aciklama">Yükleniyor…</p></div>
     ${D.proje.satis_tipi === "b2c" ? `<div class="bilgi"><b>B2C hatırlatma:</b> Bireylere SMS/e-posta/arama ile ticari ileti göndermek
       için İYS'de kayıtlı onay gerekir (6563 sayılı Kanun) ve kişisel veriler KVKK kapsamındadır. Bu projede yalnızca
       <b>“Açık rıza var”</b> işaretli kişiler iletişime uygun sayılır. Kişi listesi satın almak veya internetten kişi
       numarası toplamak yerine form, kampanya, etkinlik ve tavsiye gibi izinli kaynaklarla liste büyütün.</div>` : ""}`;
   $$("#sekme-pano tr[data-id]").forEach((tr) => (tr.onclick = () => leadModal(Number(tr.dataset.id))));
+  panoSinyalleri();
+}
+
+async function panoSinyalleri() {
+  const pid = D.proje.id;
+  const h = (await api(`/api/projeler/${pid}/haberler?filtre=ilgili`).catch(() => [])).slice(0, 6);
+  const kutu = $("#panoSinyaller");
+  if (!kutu || D.proje.id !== pid) return;
+  kutu.innerHTML = `<h2>Sinyal radarından son fırsatlar</h2>` + (h.length ? h.map(haberSatiri).join("")
+    : `<p class="aciklama">Henüz ilgili haber yok. <b>Sinyal radarı</b> sekmesinden taramayı başlatın.</p>`);
+  haberButonlari(kutu, h);
 }
 
 // --- Liste -------------------------------------------------------------------
@@ -258,6 +278,7 @@ function leadModal(id) {
       <div class="satir">
         ${id ? `<button type="button" class="btn tehlike" id="mSil">Sil</button>` : ""}
         ${id && l.web ? `<button type="button" class="btn" id="mZengin">Siteden iletişim topla</button>` : ""}
+        ${id ? `<button type="button" class="btn" id="mYz">YZ ile araştır</button>` : ""}
         ${l.kaynak ? `<a class="btn" href="${e(l.kaynak)}" target="_blank" rel="noopener">Kaynağı aç</a>` : ""}
       </div>
       <div class="satir"><button type="button" class="btn" id="mIptal">Vazgeç</button>
@@ -284,6 +305,14 @@ function leadModal(id) {
       if (!confirm(`“${l.ad}” silinsin mi?`)) return;
       await api(`/api/leadler/${id}`, "DELETE");
       dlg.close(); await leadleriYukle(); projeSayisiniGuncelle();
+    };
+    $("#mYz").onclick = async () => {
+      const b = $("#mYz"); b.disabled = true; b.textContent = "Araştırılıyor (1–2 dk)…";
+      try {
+        const s = await api(`/api/leadler/${id}/yz-arastir`, "POST", {});
+        bildir(s.guncellenen.length ? `Güncellendi: ${s.guncellenen.join(", ")}; özet notlara eklendi.` : "Araştırma özeti notlara eklendi.");
+        await leadleriYukle(); leadModal(id);
+      } catch (err) { bildir(err.message, true); b.disabled = false; b.textContent = "YZ ile araştır"; }
     };
     const z = $("#mZengin");
     if (z) z.onclick = async () => {
@@ -426,9 +455,9 @@ function yeniProjeModal() {
     try {
       const p = await api("/api/projeler", "POST", Object.fromEntries(new FormData($("#modalForm"))));
       $("#modal").close();
-      D.sekme = "ayar";
+      D.sekme = "mulakat";
       await projeleriYukle(p.id);
-      bildir("Proje oluşturuldu. Hedefleri ve sinyalleri kontrol edin.");
+      bildir("Proje oluşturuldu. Şimdi müşterinizle mülakatı yapın.");
     } catch (err) { bildir(err.message, true); }
   };
   $("#modal").showModal();
@@ -508,4 +537,4 @@ const sinyalSatiri = (s) => `<tr><td><input value="${e(s.kod)}" placeholder="oto
 const slug = (m) => m.toLocaleLowerCase("tr").replace(/[çğıöşü]/g, (c) => ({ ç: "c", ğ: "g", ı: "i", ö: "o", ş: "s", ü: "u" }[c]))
   .replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 
-basla().catch((err) => bildir(err.message, true));
+

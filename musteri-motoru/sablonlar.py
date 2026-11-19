@@ -184,3 +184,94 @@ OSM_KATEGORILER = {
     "Fabrika / üretim tesisi": [("man_made", "works"), ("industrial", "factory")],
     "Toptancı": [("shop", "wholesale")],
 }
+
+
+# --- Müşteri (freelance işveren) mülakatı ------------------------------------------
+# Her soru: (kod, soru, neden önemli). Cevaplar projede saklanır ve yapay zekâ
+# analizine girdi olur: hedef kitle, sinyaller ve haber tarama sorguları buradan çıkar.
+MULAKAT_BOLUMLERI = [
+    ("Firma ve teklif", [
+        ("firma_tanim", "Firmanızı ve ne yaptığınızı 2–3 cümleyle anlatır mısınız?",
+         "Kim adına konuşacağımızı ve konumlamayı netleştirir."),
+        ("urun_hizmet", "Satmak istediğiniz ürün/hizmet tam olarak nedir? Paketler, çeşitler, kapsam?",
+         "Hangi müşteri tipine hangi paketin gideceğini belirler."),
+        ("cozulen_sorun", "Müşterinin hangi sorununu çözüyorsunuz? Siz olmasanız müşteri ne yapardı?",
+         "Sorunun dışarıdan görülebilen izleri sinyal olur."),
+        ("fark", "Rakiplerden farkınız ne? Müşteriler sizi neden seçiyor?",
+         "İlk temas mesajının ana cümlesi buradan çıkar."),
+        ("fiyat", "Ortalama satış tutarı / fiyat aralığı nedir? Tek seferlik mi, abonelik mi?",
+         "Hangi büyüklükteki firmanın bütçesi yeteceğini gösterir."),
+        ("satis_suresi", "İlk temastan satışa ortalama ne kadar sürüyor?",
+         "Sinyallerin ne kadar süre 'sıcak' kalacağını (yarı ömür) ayarlar."),
+    ]),
+    ("Mevcut müşteriler", [
+        ("en_iyi_musteriler", "En iyi 5–10 müşteriniz kim? Ortak noktaları ne (sektör, büyüklük, durum)?",
+         "En güvenilir ideal müşteri profili, mevcut iyi müşterilerin benzerleridir."),
+        ("musteri_sektor", "Müşterileriniz hangi sektörlerden? En çok hangisinde başarılısınız?",
+         "Hedef sektörler ve OSM/haber aramaları."),
+        ("musteri_buyukluk", "Müşterilerinizin büyüklüğü nedir (çalışan sayısı, ciro, şube sayısı)?",
+         "Hedef firma büyüklüğü."),
+        ("musteri_konum", "Hangi şehir/bölgelerde hizmet veriyorsunuz? Uzak bölgelere satış yapabiliyor musunuz?",
+         "Hedef şehirler ve arama bölgesi."),
+        ("kayip_musteri", "Kaybettiğiniz veya size uygun olmayan müşteriler kimler? Kimlerle çalışmak istemezsiniz?",
+         "Negatif filtre: zaman kaybettiren profilleri eler."),
+        ("off_limits", "Kesinlikle aranmaması gereken firmalar var mı (mevcut müşteriler, ortaklar, rakipler)?",
+         "Bu firmalar 'uygun değil / izin yok' olarak işaretlenir."),
+    ]),
+    ("Karar verici ve satın alma süreci", [
+        ("karar_verici", "Satın alma kararını kim veriyor (unvan)? Kim etkiliyor, kim onaylıyor?",
+         "Hedef unvanlar ve ulaşılacak kişi."),
+        ("kullanici", "Ürünü/hizmeti günlük olarak kim kullanıyor?",
+         "İkinci temas kişisi ve iç savunucu (champion)."),
+        ("satin_alma_sureci", "Satın alma nasıl işliyor? Teklif, ihale, deneme, pilot, sözleşme?",
+         "Takip adımları ve beklenen süre."),
+        ("butce_donemi", "Bütçe dönemleri veya mevsimsellik var mı? Hangi aylarda karar veriliyor?",
+         "Doğru zamanda temas için takvim."),
+    ]),
+    ("Tetikleyici olaylar (sinyaller)", [
+        ("tetikleyici_olay", "Müşteriler genellikle hangi olaydan sonra size geliyor? (yeni yatırım, yönetici değişikliği, büyüme, sorun, mevzuat…)",
+         "Sistemin haberlerde ve ilanlarda arayacağı ana sinyaller."),
+        ("erken_belirti", "Müşteri ihtiyacını fark etmeden ÖNCE dışarıdan görülebilen belirtiler neler? (ilan, haber, web sitesi, yorumlar, ihale)",
+         "Müşteri ihtiyacını bilmeden ona ulaşmamızı sağlayan bilgi."),
+        ("mevzuat", "İhtiyacı doğuran veya zorunlu kılan mevzuat, standart, denetim, teşvik, son tarih var mı?",
+         "Mevzuat değişiklikleri toplu ve zamanlı sinyal üretir."),
+        ("aciliyet", "Hangi durumda ihtiyaç acil hale gelir?",
+         "Yüksek ağırlıklı sinyaller."),
+        ("ihtiyac_yok", "Hangi durumdaki bir firmanın size ihtiyacı olmaz?",
+         "Yanlış pozitifleri azaltır."),
+    ]),
+    ("Pazar ve rakipler", [
+        ("rakipler", "Başlıca rakipleriniz kimler? Rakip kullanan firmalara satış yapabiliyor musunuz?",
+         "Rakip müşterileri ve rakip haberleri de sinyal olabilir."),
+        ("ikame", "Müşteriler sizin yerine şu an ne kullanıyor (Excel, kendi ekibi, başka tedarikçi…)?",
+         "Mesajda karşılaştırılacak 'mevcut durum'."),
+        ("trendler", "Sektörünüzde talebi artıran güncel gelişmeler neler?",
+         "Haber tarama sorgularına eklenir."),
+    ]),
+    ("Ulaşma", [
+        ("kanal", "Hangi kanal işe yarıyor: telefon, e-posta, LinkedIn, WhatsApp, ziyaret, fuar?",
+         "Hangi iletişim bilgisinin toplanacağını belirler."),
+        ("mesaj", "Müşteriyi ikna eden cümle veya başarı hikâyesi nedir? Referans gösterilebilecek müşteri var mı?",
+         "İlk temas mesajı ve referans."),
+        ("kapi_acici", "Kapı açıcı bir teklifiniz var mı (ücretsiz analiz, deneme, demo, numune)?",
+         "Düşük riskli ilk adım dönüşümü artırır."),
+        ("temas_kimin_adina", "Temas kimin adına yapılacak? Toplantıları kim yapacak? Haftada kaç toplantı kaldırırsınız?",
+         "Liste hacmi ve haftalık ritim."),
+        ("izinli_veri", "Elinizde izinli müşteri/aday verisi var mı (CRM, form, İYS onaylı liste, fuar kartları)?",
+         "B2C ve yeniden kazanım için yasal başlangıç listesi."),
+    ]),
+    ("Hedef ve çalışma modeli", [
+        ("hedef", "Önümüzdeki 3 ayda kaç toplantı / yeni müşteri hedefliyorsunuz?",
+         "Liste büyüklüğü ve önceliklendirme eşikleri."),
+        ("odeme_modeli", "Çalışma ve ödeme modeli: sabit ücret, toplantı başı, satış primi?",
+         "Raporlama ve başarı ölçütü."),
+        ("materyal", "Sunum, broşür, fiyat listesi, referans listesi gibi materyaller var mı?",
+         "Takip e-postalarına eklenecek içerik."),
+    ]),
+]
+
+# YZ kullanılmadığında haber taramasında kullanılacak genel sinyal kelimeleri
+GENEL_SINYAL_KELIMELERI = [
+    "yatırım", "fabrika", "tesis", "kapasite", "yeni şube", "açılış", "atandı", "genel müdür",
+    "satın aldı", "birleşme", "halka arz", "ihale", "teşvik", "ihracat", "büyüme", "işe alım",
+]
