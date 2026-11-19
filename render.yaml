@@ -1,0 +1,22 @@
+# Render.com Blueprint — Müşteri Bulma Motoru'nu tek linkte, 7/24 çalıştırır.
+# Kurulum adımları: musteri-motoru/BULUT-KURULUM.md
+services:
+  - type: web
+    name: musteri-motoru
+    runtime: python
+    plan: starter            # kalıcı disk ve sürekli çalışma için (ücretsiz plan uykuya geçer, veriyi silebilir)
+    rootDir: musteri-motoru
+    buildCommand: pip install -r gereksinimler.txt
+    startCommand: python sunucu.py --host 0.0.0.0 --tarayici-acma
+    healthCheckPath: /index.html
+    envVars:
+      - key: MOTOR_SIFRE      # uygulamaya girişte istenecek şifre (en az 8 karakter)
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: MOTOR_DB
+        value: /var/data/motor.db
+    disk:
+      name: veri
+      mountPath: /var/data
+      sizeGB: 1

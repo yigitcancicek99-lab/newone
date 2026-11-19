@@ -1,5 +1,10 @@
 # newone — Cornerstone Türkiye İş Geliştirme Sistemi
 
+> **Yeni:** [`musteri-motoru/`](musteri-motoru/) — bu sistemin her sektöre uyarlanabilen, B2B ve B2C için çalışan
+> genel sürümü. Proje bazlı (her müşteri bir proje), OpenStreetMap'ten işletme bulma, web sitelerinden telefon/e-posta
+> toplama, CSV içe/dışa aktarma ve müşteriye teslim raporu içeren yerel web uygulaması.
+> Başlatmak için: `python3 musteri-motoru/sunucu.py` — ayrıntılar [`musteri-motoru/README.md`](musteri-motoru/README.md).
+
 **Sinyal odaklı müşteri bulma motoru:** Cornerstone Executive Search Türkiye'nin hizmetlerine (üst düzey yönetici araması, yönetim kurulu araması, pazar haritalama, halef planlaması, outplacement, interim yönetim) ihtiyaç duyacak şirketleri **ihtiyacın doğduğu anda** bulmak, önceliklendirmek ve düzenli bir ritimle ulaşmak için kurulmuş sistem.
 
 > Temel fikir: Şirketler ancak bir **olay** yaşadığında üst düzey yönetici arar — CEO ayrılır, fabrika açılır, halka arz olunur, şirket satın alınır, direktör ilanı haftalarca açık kalır. Bu olayları ilk yakalayan, işi alır.

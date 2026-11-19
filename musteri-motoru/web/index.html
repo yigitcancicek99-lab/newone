@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Müşteri Bulma Motoru</title>
+<link rel="stylesheet" href="/stil.css">
+</head>
+<body>
+<div class="duzen">
+  <aside class="kenar">
+    <div class="marka">Müşteri<br><span>Bulma Motoru</span></div>
+    <button class="btn birincil tam" id="yeniProjeBtn">+ Yeni proje</button>
+    <div class="kenar-baslik">Projeler</div>
+    <nav id="projeListesi"></nav>
+    <button class="btn tam yz-btn" id="yzAyarBtn"><span class="nokta" id="yzNokta"></span> Yapay zekâ ayarları</button>
+  </aside>
+
+  <main class="ana">
+    <div id="bosEkran" class="bos-ekran gizli">
+      <h1>Hoş geldiniz</h1>
+      <p>Her müşteriniz (veya sattığınız her ürün/hizmet) için bir <b>proje</b> açın. Proje; hedef kitleyi,
+        izlenecek satın alma sinyallerini ve puanlama kurallarını tutar. Ardından OpenStreetMap'ten işletme
+        çekebilir, CSV içe aktarabilir, web sitelerinden telefon/e-posta toplayabilir ve öncelikli listeyi
+        müşterinize rapor olarak teslim edebilirsiniz.</p>
+      <div class="satir">
+        <button class="btn birincil" id="bosYeniBtn">İlk projeyi oluştur</button>
+        <button class="btn" id="ornekBtn">Örnek proje yükle (Cornerstone verisi)</button>
+      </div>
+    </div>
+
+    <div id="projeEkran" class="gizli">
+      <header class="baslik">
+        <div>
+          <h1 id="projeAd"></h1>
+          <div class="alt" id="projeAlt"></div>
+        </div>
+        <div class="satir">
+          <a class="btn" id="raporBtn" target="_blank">Müşteri raporu</a>
+          <a class="btn" id="disaBtn">CSV indir</a>
+        </div>
+      </header>
+      <div class="sekmeler" role="tablist">
+        <button data-sekme="pano" class="aktif">Pano</button>
+        <button data-sekme="mulakat">1 · Mülakat</button>
+        <button data-sekme="radar">2 · Sinyal radarı</button>
+        <button data-sekme="liste">Liste</button>
+        <button data-sekme="bul">Müşteri bul</button>
+        <button data-sekme="ice">İçe aktar</button>
+        <button data-sekme="ayar">Proje ayarları</button>
+      </div>
+
+      <section id="sekme-pano" class="sekme"></section>
+      <section id="sekme-mulakat" class="sekme gizli"></section>
+      <section id="sekme-radar" class="sekme gizli"></section>
+
+      <section id="sekme-liste" class="sekme gizli">
+        <div class="filtreler">
+          <input id="fAra" type="search" placeholder="Ara: ad, şehir, sektör, kişi…">
+          <select id="fOncelik"><option value="">Tüm öncelikler</option><option>A</option><option>B</option><option>C</option></select>
+          <select id="fDurum"><option value="">Tüm durumlar</option></select>
+          <select id="fSinyal"><option value="">Tüm sinyaller</option><option value="-">Sinyalsiz</option></select>
+          <select id="fIletisim">
+            <option value="">İletişim: hepsi</option>
+            <option value="telefonlu">Telefonu olan</option>
+            <option value="telefonsuz">Telefonu olmayan</option>
+            <option value="epostasiz">E-postası olmayan</option>
+          </select>
+          <button class="btn" id="yeniLeadBtn">+ Kayıt ekle</button>
+          <button class="btn" id="topluZenginBtn" title="Web adresi olup telefonu veya e-postası eksik kayıtlar">Sitelerden iletişim topla</button>
+        </div>
+        <div class="ilerleme gizli" id="zenginIlerleme"><div class="cubuk"><div></div></div><span></span></div>
+        <div class="tablo-kap"><table class="tablo" id="leadTablo"></table></div>
+      </section>
+
+      <section id="sekme-bul" class="sekme gizli">
+        <div class="kart">
+          <h2>Yapay zekâ ile internette aday araştır</h2>
+          <p class="aciklama">Claude internette (haberler, KAP, ilanlar, teşvik ve ihale duyuruları, şirket siteleri) arama yaparak
+            ideal müşteri profiline uyan ve son 6 ayda satın alma sinyali veren şirketleri bulur. Bir araştırma 1–3 dakika sürer.</p>
+          <form id="ydForm" class="izgara">
+            <label class="tam-satir">Ek talimat (isteğe bağlı)<input name="talimat" placeholder="ör. Sadece Kocaeli ve Bursa OSB'lerindeki gıda üreticileri"></label>
+            <label>Aday sayısı<input name="adet" type="number" value="15" min="5" max="40"></label>
+            <div class="tam-satir"><button class="btn birincil" type="submit">Araştır</button> <span id="ydDurum" class="aciklama"></span></div>
+          </form>
+        </div>
+        <div id="ydSonuc"></div>
+        <div class="kart">
+          <h2>OpenStreetMap'ten işletme bul</h2>
+          <p class="aciklama">Seçtiğiniz şehir/ilçedeki işletmeleri adı, telefonu, web sitesi ve adresiyle getirir. Ücretsiz,
+            anahtar gerekmez. Kapsam şehre göre değişir; telefonu eksik olanlar için sonra
+            <b>Liste → Sitelerden iletişim topla</b>'yı kullanın.</p>
+          <form id="osmForm" class="izgara">
+            <label>Kategori<select name="kategori" id="osmKategori"></select></label>
+            <label>veya özel OSM etiketi<input name="ozel_etiket" placeholder="ör. shop=bakery"></label>
+            <label>Şehir (il)<input name="sehir" required placeholder="ör. İstanbul"></label>
+            <label>İlçe (isteğe bağlı)<input name="ilce" placeholder="ör. Kadıköy"></label>
+            <label>Adında geçen (isteğe bağlı)<input name="ad_icerir" placeholder="ör. diş"></label>
+            <label>En fazla<input name="limit" type="number" value="200" min="10" max="2000"></label>
+            <div class="tam-satir"><button class="btn birincil" type="submit">Ara</button> <span id="osmDurum" class="aciklama"></span></div>
+          </form>
+        </div>
+        <div id="osmSonuc"></div>
+        <div class="kart">
+          <h2>Sinyal kaynakları (elle ekleme için)</h2>
+          <p class="aciklama">En sıcak müşteriler bir <b>olay</b> yaşayanlardır. Bu kaynakları haftalık tarayıp bulduklarınızı
+            <b>Liste → Kayıt ekle</b> ile sinyal ve tarihiyle girin; puanlama sinyalin tazeliğini hesaba katar.</p>
+          <ul class="kaynaklar">
+            <li><b>KAP (kap.org.tr)</b> – yönetici değişikliği, yatırım, birleşme, halka arz</li>
+            <li><b>Ticaret Sicili Gazetesi</b> – yeni kurulan şirketler, sermaye artırımı, adres değişikliği</li>
+            <li><b>Sanayi ve Teknoloji Bakanlığı</b> – yatırım teşvik belgesi alan firmalar</li>
+            <li><b>EKAP / ihale ilanları</b> – kamu ve özel satın alma talepleri</li>
+            <li><b>LinkedIn ve kariyer siteleri</b> – açılan pozisyonlar (büyüme ve ihtiyaç sinyali)</li>
+            <li><b>Fuar katılımcı listeleri</b> – sektörünüzdeki aktif firmalar</li>
+            <li><b>Google Haritalar yorumları</b> – yeni açılan, düşük puanlı veya web sitesi olmayan işletmeler</li>
+            <li><b>Sektör dernekleri, OSB ve ticaret odası üye listeleri</b> – toplu firma listesi (CSV olarak içe aktarın)</li>
+          </ul>
+        </div>
+      </section>
+
+      <section id="sekme-ice" class="sekme gizli">
+        <div class="kart">
+          <h2>CSV / Excel listesi içe aktar</h2>
+          <p class="aciklama">Excel'de <b>Farklı kaydet → CSV</b> ile kaydedin. Başlıklar otomatik eşlenir
+            (Firma/Şirket/Ad, Telefon, E-posta, Web, Şehir, İlçe, Sektör, Yetkili, Unvan…). Eşlenmeyen sütunlar notlara yazılır.
+            Aynı telefon, web alanı, e-posta veya ad+şehir zaten varsa kayıt <b>mükerrer</b> sayılır ve yalnızca boş alanları doldurulur.</p>
+          <form id="iceForm" class="izgara">
+            <label class="tam-satir">Dosya<input type="file" id="iceDosya" accept=".csv,.txt,text/csv"></label>
+            <label class="tam-satir">veya buraya yapıştırın<textarea id="iceMetin" rows="6" placeholder="Firma;Telefon;Şehir&#10;Örnek Ltd;0212 555 11 22;İstanbul"></textarea></label>
+            <label>Varsayılan sektör<input name="sektor"></label>
+            <label>Varsayılan şehir<input name="sehir"></label>
+            <label>Varsayılan sinyal<select name="sinyal" id="iceSinyal"></select></label>
+            <label>İzin durumu<select name="izin" id="iceIzin"></select></label>
+            <div class="tam-satir"><button class="btn birincil" type="submit">İçe aktar</button></div>
+          </form>
+          <div id="iceSonuc"></div>
+        </div>
+      </section>
+
+      <section id="sekme-ayar" class="sekme gizli"></section>
+    </div>
+  </main>
+</div>
+
+<dialog id="modal"><form method="dialog" id="modalForm"></form></dialog>
+<div id="bildirim" class="bildirim"></div>
+<script src="/kisiler.js"></script>
+<script src="/uygulama.js"></script>
+<script src="/yz-arayuz.js"></script>
+</body>
+</html>
