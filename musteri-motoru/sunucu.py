@@ -11,6 +11,8 @@ Yalnızca Python standart kütüphanesi kullanır (Python 3.8+).
 """
 
 import argparse
+import base64
+import hmac
 import html
 import json
 import mimetypes
@@ -480,7 +482,7 @@ white-space:pre-wrap;margin-top:4px}}@media print{{.yazdir{{display:none}}body{{
 {''.join(bolumler)}</body></html>"""
 
 
-def isleyici_olustur(uygulama):
+def isleyici_olustur(uygulama, sifre="", bulut=False):
     class Isleyici(BaseHTTPRequestHandler):
         server_version = "MusteriMotoru/1.0"
 
@@ -512,7 +514,27 @@ def isleyici_olustur(uygulama):
             with open(tam, "rb") as f:
                 self._gonder(200, f.read(), tur)
 
+        def _yetkili(self):
+            """Bulut modunda her istek için kullanıcı adı serbest, şifre MOTOR_SIFRE (HTTP Basic)."""
+            if not sifre:
+                return True
+            baslik = self.headers.get("Authorization") or ""
+            if baslik.startswith("Basic "):
+                try:
+                    gelen = base64.b64decode(baslik[6:]).decode("utf-8").split(":", 1)[1]
+                except (ValueError, IndexError):
+                    gelen = ""
+                if hmac.compare_digest(gelen.encode(), sifre.encode()):
+                    return True
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Musteri Bulma Motoru", charset="UTF-8"')
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return False
+
         def _islem(self, yontem):
+            if not self._yetkili():
+                return
             url = urlparse(self.path)
             if not url.path.startswith("/api/"):
                 if yontem == "GET":
@@ -520,7 +542,7 @@ def isleyici_olustur(uygulama):
                 return self._gonder(405, {"hata": "İzin verilmeyen yöntem"})
             # Yalnızca bu bilgisayardan gelen isteklere yanıt ver (DNS rebinding koruması)
             host = (self.headers.get("Host") or "").split(":")[0]
-            if host not in ("127.0.0.1", "localhost"):
+            if not bulut and host not in ("127.0.0.1", "localhost"):
                 return self._gonder(403, {"hata": "Yalnızca yerel erişim"})
             govde = {}
             uzunluk = int(self.headers.get("Content-Length") or 0)
@@ -562,10 +584,17 @@ def isleyici_olustur(uygulama):
 
 def main():
     ap = argparse.ArgumentParser(description="Müşteri Bulma Motoru")
-    ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--db", default=motor.VARSAYILAN_DB)
+    ap.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8765))
+    ap.add_argument("--host", default=os.environ.get("MOTOR_HOST", "127.0.0.1"),
+                    help="Bulutta 0.0.0.0 (bu durumda MOTOR_SIFRE zorunlu)")
+    ap.add_argument("--db", default=os.environ.get("MOTOR_DB") or motor.VARSAYILAN_DB)
     ap.add_argument("--tarayici-acma", action="store_true")
     args = ap.parse_args()
+    bulut = args.host not in ("127.0.0.1", "localhost")
+    sifre = os.environ.get("MOTOR_SIFRE", "")
+    if bulut and len(sifre) < 8:
+        sys.exit("Uygulama internete açılırken MOTOR_SIFRE ortam değişkeniyle en az 8 karakterlik bir şifre "
+                 "belirlenmeli (müşteri verileriniz ve API anahtarınız korunmalı).")
     uygulama = Uygulama(args.db)
 
     def istemci_fabrikasi():
@@ -574,10 +603,10 @@ def main():
         except yz.YZHatasi:
             return None
     tarayici.zamanlayici_baslat(uygulama.db, KILIT, istemci_fabrikasi)
-    sunucu = ThreadingHTTPServer(("127.0.0.1", args.port), isleyici_olustur(uygulama))
+    sunucu = ThreadingHTTPServer((args.host, args.port), isleyici_olustur(uygulama, sifre, bulut))
     adres = f"http://127.0.0.1:{args.port}"
     print(f"Müşteri Bulma Motoru çalışıyor: {adres}\nVeritabanı: {args.db}\nDurdurmak için Ctrl+C")
-    if not args.tarayici_acma:
+    if not args.tarayici_acma and not bulut:
         threading.Timer(0.8, lambda: webbrowser.open(adres)).start()
     try:
         sunucu.serve_forever()

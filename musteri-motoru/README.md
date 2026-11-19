@@ -6,6 +6,14 @@ toplar, her kaydı **satın alma sinyaline** göre puanlar ve müşterinize tesl
 
 Freelance müşteri bulma hizmeti için tasarlandı: **her müşteriniz = bir proje**.
 
+## Üç kullanım yolu
+
+| Sürüm | Nasıl açılır | Neler var |
+|---|---|---|
+| **claude.ai link sürümü** | <https://claude.ai/artifact/7DCkYeX8zxU7LyuCzF1nVQ> (kaynak: `link-surumu/index.html`) | Mülakat, YZ analizi, ek sorular, haber/metinden fırsat çıkarma, YZ aday önerisi, puanlı liste, kişiye özel mesaj, CSV, rapor. Canlı internet taraması yok. |
+| **Bulut (tam sürüm)** | Render.com'a kurulum: [`BULUT-KURULUM.md`](BULUT-KURULUM.md) | Hepsi + 7/24 sinyal radarı, web sitesinden iletişim toplama, harita araması, web aramalı araştırma |
+| **Bilgisayarda (tam sürüm)** | Aşağıdaki kurulum | Bulutla aynı; uygulama açıkken çalışır |
+
 ## Kurulum ve çalıştırma
 
 Python 3.8+ gerekir. [python.org](https://www.python.org/downloads/) → kurarken *"Add Python to PATH"* işaretleyin.
